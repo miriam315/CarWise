@@ -16,3 +16,8 @@
 @media(max-width:520px){.hero-photo{top:-8px;left:-15%;width:128%;height:190px}.float-saving{bottom:9px}.hero{min-height:435px}.hero-visual{bottom:0;height:192px}}
 
 .login-form{width:min(400px,90vw);padding:30px;display:flex;flex-direction:column;gap:20px}.login-form h1{font-size:24px;color:#554365}.login-form p{font-size:11px;line-height:1.8}.login-form label{font-size:11px;display:flex;flex-direction:column;gap:7px}.login-form input{border:1px solid #ded4eb;border-radius:7px;padding:12px;background:#fcfaff;direction:ltr}.login-form button{width:100%}
+
+/* Navigation stays reachable at normal zoom and in short browser windows. */
+.sidebar{overflow-y:auto;overscroll-behavior-y:contain;scrollbar-width:thin;scrollbar-color:#cdbfe8 transparent}
+.sidebar>*{flex-shrink:0}
+@media(max-height:800px){.sidebar{padding-top:22px;padding-bottom:16px}.sidebar .workspace-label{margin-top:20px;margin-bottom:16px}.sidebar nav{gap:5px}.sidebar nav>button{padding-top:10px;padding-bottom:10px}.sidebar-divider{margin-top:18px;margin-bottom:15px}.sidebar-bottom{padding-top:24px}.sidebar-bottom .help-card{padding:16px 13px}.sidebar-bottom .strauss-logo{margin-top:20px}}

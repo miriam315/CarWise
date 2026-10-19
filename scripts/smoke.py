@@ -60,8 +60,24 @@ with tempfile.TemporaryDirectory(prefix='carwise-smoke-') as temp:
    assert dl.value.suggested_filename=='CarWise-comparison.csv'
    assert '11' in Path(dl.value.path()).read_text(encoding='utf-8-sig')
    screenshots=ROOT/'.local/screenshots';screenshots.mkdir(parents=True,exist_ok=True)
-   page.screenshot(path=str(screenshots/'desktop.png'),full_page=True)
    def nav(name):page.locator('.sidebar nav').get_by_role('button',name=name,exact=False).click()
+   # Short laptop windows and 125%-equivalent viewport: every sidebar control must scroll into view.
+   for width,height in [(1366,768),(1280,600),(1093,614),(800,450)]:
+    page.set_viewport_size({'width':width,'height':height})
+    page.locator('.sidebar-bottom .strauss-logo').scroll_into_view_if_needed()
+    bounds=page.locator('.sidebar-bottom .strauss-logo').bounding_box()
+    assert bounds['y']>=0 and bounds['y']+bounds['height']<=height+1,(width,height,bounds)
+    nav('מקורות וכללים');expect(page.locator('.source-card').first).to_be_visible()
+    page.locator('.sidebar .brand').scroll_into_view_if_needed()
+    bounds=page.locator('.sidebar .brand').bounding_box();assert bounds['y']>=0
+    nav('הסקירה שלי')
+    assert not page.evaluate('document.documentElement.scrollWidth > innerWidth')
+   page.set_viewport_size({'width':1366,'height':768})
+   page.locator('.sidebar-bottom .strauss-logo').scroll_into_view_if_needed()
+   page.screenshot(path=str(screenshots/'sidebar-laptop.png'),full_page=False)
+   page.locator('.sidebar .brand').scroll_into_view_if_needed()
+   page.set_viewport_size({'width':1440,'height':1100})
+   page.screenshot(path=str(screenshots/'desktop.png'),full_page=True)
    nav('הנתונים שלי')
    page.get_by_label('שכר בסיס חודשי (₪)').fill('19500')
    page.get_by_role('button',name='שמירה וחישוב מחדש').click()
