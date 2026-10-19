@@ -37,7 +37,7 @@ public sealed class Repository(IJsonDatabase db)
         // Rules are the completion marker. Failed partial imports are safe to retry.
         await db.UpsertAsync("carwise_rules",new JsonArray(new JsonObject{["id"]="active",["document"]=data.Rules.DeepClone()}),ct);
     }
-    public async Task<ReferenceData> LoadAsync(CancellationToken ct=default)
+    public async Task<ReferenceData> LoadAsync(CancellationToken ct=default,Action<int>? officialProgress=null)
     {
         var rules=await db.ReadAsync("carwise_rules",new Dictionary<string,string>{{"id","active"}},ct:ct);
         if(rules.Count!=1)throw new InvalidOperationException("Reference data is not imported. Apply the Supabase migration, then run npm run db:import.");
@@ -48,10 +48,11 @@ public sealed class Repository(IJsonDatabase db)
         string? after=null;
         while(true)
         {
-            var rows=await db.ReadAsync("carwise_official",ct:ct,afterId:after);
+            var rows=await db.ReadAsync("carwise_official",limit:db is SupabaseDatabase?250:1000,ct:ct,afterId:after);
             if(rows.Count==0)break;
             after=rows[^1]!["id"]!.GetValue<string>();
             official.AddRange(rows.Select(r=>ReferenceData.ParseOfficial(Read<Dictionary<string,string>>(r!["document"]!))));
+            if(official.Count==rows.Count||official.Count%10000<rows.Count)officialProgress?.Invoke(official.Count);
         }
         return ReferenceData.FromSnapshot(new(rules[0]!["document"]!.DeepClone(),cars,employees,occupations,official));
     }

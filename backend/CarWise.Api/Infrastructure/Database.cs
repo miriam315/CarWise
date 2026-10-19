@@ -108,7 +108,13 @@ public sealed class SupabaseDatabase(HttpClient client) : IJsonDatabase
         var query=$"rest/v1/{Uri.EscapeDataString(table)}?select=*&order="+(table=="carwise_conversations"?"employee_id":"id")+$".asc&offset={offset}&limit={limit}";
         if(afterId is not null)query+="&id=gt."+Uri.EscapeDataString(afterId);
         if(filters is not null)foreach(var (key,value) in filters)query+=key=="id_prefix"?"&id=like."+Uri.EscapeDataString(value+"*"):$"&{Uri.EscapeDataString(key)}=eq.{Uri.EscapeDataString(value)}";
-        return (await SendAsync(new(HttpMethod.Get,query),ct)).AsArray();
+        for(var attempt=0;;attempt++)
+        {
+            ct.ThrowIfCancellationRequested();
+            try{return (await SendAsync(new(HttpMethod.Get,query),ct)).AsArray();}
+            catch(Exception error)when(attempt==0&&!ct.IsCancellationRequested&&error is OperationCanceledException or HttpRequestException)
+            {await Task.Delay(TimeSpan.FromMilliseconds(500),ct);}
+        }
     }
     public async Task UpsertAsync(string table,JsonArray rows,CancellationToken ct=default)
     {

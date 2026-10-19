@@ -9,7 +9,13 @@ if(executable.startsWith('/workspace/')){
  mkdirSync(env.DOTNET_CLI_HOME,{recursive:true});
 }
 const args=process.argv.slice(2);
-if(args[0]==='run')env.CARWISE_MANAGED_LIFECYCLE='1';
+if(args[0]==='run'){
+ env.CARWISE_MANAGED_LIFECYCLE='1';
+ if(!args.includes('--no-build')&&!args.some(arg=>arg==='--verbosity'||arg==='-v'||arg.startsWith('--verbosity='))){
+  const separator=args.indexOf('--');args.splice(separator<0?args.length:separator,0,'--verbosity','minimal');
+ }
+ console.log('[CarWise] Starting .NET'+(args.includes('--no-build')?'...':': restoring packages and building the server...'));
+}
 let result;
 do{
  result=spawnSync(executable,args,{cwd:root,env,stdio:'inherit'});

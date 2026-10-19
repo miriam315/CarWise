@@ -3,7 +3,7 @@ using CarWise.Api.Administration;
 namespace CarWise.Api.Infrastructure;
 public static class InitialSetup
 {
-    public static async Task RunAsync(WebApplicationBuilder builder,string root,ServerConnectionManager manager)
+    public static async Task RunAsync(WebApplicationBuilder builder,string root,ServerConnectionManager manager,string? setupReason=null)
     {
         var app=builder.Build();
         app.UseForwardedHeaders();
@@ -21,7 +21,7 @@ public static class InitialSetup
             catch(ArgumentException error){context.Response.StatusCode=400;await context.Response.WriteAsJsonAsync(new{error=error.Message});}
             catch(Exception){context.Response.StatusCode=500;await context.Response.WriteAsJsonAsync(new{error="לא ניתן לשמור את החיבור. בדקו הרשאות לתיקיית ההגדרות של השרת."});}
         });
-        app.MapGet("/api/runtime",()=>new{server="ASP.NET Core 10",requiresSetup=true,authenticationRequired=false,instanceId=ServerInstance.Id});
+        app.MapGet("/api/runtime",()=>new{server="ASP.NET Core 10",requiresSetup=true,authenticationRequired=false,instanceId=ServerInstance.Id,setupReason});
         app.MapGet("/api/health",()=>new{status="setup-required"});
         app.MapGet("/api/setup/connection",(CancellationToken ct)=>manager.ViewAsync(ct));
         app.MapPost("/api/setup/connection",async(SaveServerConnection request,HttpContext context,CancellationToken ct)=>{

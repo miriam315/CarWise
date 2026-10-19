@@ -12,6 +12,7 @@ using CarWise.Api.Infrastructure;
 using Microsoft.Extensions.FileProviders;
 using Npgsql;
 
+Console.WriteLine("[CarWise] Server process started. Reading saved connection settings...");
 var builder=WebApplication.CreateBuilder(args);
 var root=Environment.GetEnvironmentVariable("CARWISE_ROOT")??FindRoot();
 builder.Configuration.AddJsonFile(Path.Combine(root,".local","appsettings.Development.json"),optional:true,reloadOnChange:false);
@@ -48,7 +49,7 @@ HttpClient SupabaseClient()
     var uri=new Uri((supabaseUrl??"https://unconfigured.invalid").TrimEnd('/')+"/");
     if(uri.Scheme!="https" && !(builder.Environment.IsDevelopment() && uri.IsLoopback))
         throw new InvalidOperationException("Supabase requires HTTPS.");
-    var client=new HttpClient{BaseAddress=uri,Timeout=TimeSpan.FromSeconds(30)};
+    var client=new HttpClient{BaseAddress=uri,Timeout=TimeSpan.FromSeconds(Math.Clamp(builder.Configuration.GetValue("CarWise:SupabaseRequestTimeoutSeconds",30),1,120))};
     if(!string.IsNullOrWhiteSpace(supabaseKey))
     {
         client.DefaultRequestHeaders.Add("apikey",supabaseKey);
@@ -82,16 +83,17 @@ if(args.Contains("--import-data"))
     Console.WriteLine("Imported official vehicle data, catalogue, employees, occupations and active rules into "+repository.Provider);
     return;
 }
+var startupTimeout=TimeSpan.FromSeconds(Math.Clamp(builder.Configuration.GetValue("CarWise:StartupTimeoutSeconds",180),30,900));
 ReferenceData reference;
 try
 {
     if(database is PostgresDatabase && !await repository.HasReferenceDataAsync())await repository.SeedAsync(ReferenceData.FromFiles(dataPath));
-    reference=await repository.LoadAsync();
+    reference=await StartupProgress.RunAsync("Loading reference data from "+repository.Provider,ct=>repository.LoadAsync(ct,count=>Console.WriteLine($"[CarWise] Official vehicle records loaded: {count:N0}")),startupTimeout);
 }
-catch(Exception error)when(database is SupabaseDatabase&&error is not OperationCanceledException)
+catch(Exception error)when(database is SupabaseDatabase)
 {
-    Console.Error.WriteLine("Supabase reference data could not be loaded. Open localhost to check or replace the saved connection.");
-    await InitialSetup.RunAsync(builder,root,connectionManager);return;
+    Console.Error.WriteLine(error is TimeoutException or OperationCanceledException?"[CarWise] Supabase startup timed out. Check the connection/network in the local setup page.":"[CarWise] Supabase reference data could not be loaded. Open localhost to check or replace the saved connection.");
+    await InitialSetup.RunAsync(builder,root,connectionManager,"טעינת הנתונים מ־Supabase לא הושלמה. החיבור השמור לא נמחק. בדקו גישה לפרויקט ולרשת, ונסו שוב באמצעות בדיקת החיבור והשמירה. אין צורך להזין מחדש מפתח שכבר נשמר.");return;
 }
 var defaultProfile=new AiProfile{Model=builder.Configuration["Ai:Model"]??"gpt-4.1-mini",BaseUrl=builder.Configuration["Ai:BaseUrl"]??"https://api.openai.com/v1/"};
 var defaultAi=new AiConfiguration(!string.IsNullOrWhiteSpace(builder.Configuration["CARWISE_AI_API_KEY"]??builder.Configuration["Ai:ApiKey"]),defaultProfile,defaultProfile);
@@ -131,7 +133,15 @@ builder.Services.AddRateLimiter(options=>{
 var app=builder.Build();
 // Trust only the framework's default loopback proxies unless explicitly configured by the host.
 app.UseForwardedHeaders();
-await app.Services.GetRequiredService<ConfigurationService>().RefreshAsync(CancellationToken.None);
+try
+{
+    await StartupProgress.RunAsync("Loading saved administration settings",async ct=>{await app.Services.GetRequiredService<ConfigurationService>().RefreshAsync(ct);return true;},startupTimeout);
+}
+catch(Exception)
+{
+    Console.Error.WriteLine("[CarWise] Saved administration settings could not be loaded. Check database access and the active official-data version. No default configuration was activated.");
+    await app.DisposeAsync();throw new InvalidOperationException("CarWise startup failed while loading administration settings. Check the connection and network, then restart.");
+}
 app.UseRateLimiter();
 app.Use(async(context,next)=>
 {
