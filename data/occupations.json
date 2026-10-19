@@ -1,0 +1,100 @@
+[
+  {
+    "occupation": "נציג/ת מכירות שטח",
+    "group": "ב",
+    "mandatory": true,
+    "waiver": false,
+    "maintenance": 0
+  },
+  {
+    "occupation": "מנהל/ת אזור מכירות",
+    "group": "ג",
+    "mandatory": true,
+    "waiver": false,
+    "maintenance": 0
+  },
+  {
+    "occupation": "טכנאי/ת שירות",
+    "group": "א",
+    "mandatory": true,
+    "waiver": false,
+    "maintenance": 0
+  },
+  {
+    "occupation": "נהג/ת הפצה",
+    "group": "א",
+    "mandatory": true,
+    "waiver": false,
+    "maintenance": 0
+  },
+  {
+    "occupation": "מפקח/ת איכות במפעל",
+    "group": "א",
+    "mandatory": false,
+    "waiver": true,
+    "maintenance": 1200
+  },
+  {
+    "occupation": "רכז/ת רכש",
+    "group": "א",
+    "mandatory": false,
+    "waiver": true,
+    "maintenance": 1200
+  },
+  {
+    "occupation": "מהנדס/ת תהליך",
+    "group": "ב",
+    "mandatory": false,
+    "waiver": true,
+    "maintenance": 1500
+  },
+  {
+    "occupation": "מפתח/ת תוכנה",
+    "group": "ב",
+    "mandatory": false,
+    "waiver": true,
+    "maintenance": 1500
+  },
+  {
+    "occupation": "אנליסט/ית נתונים",
+    "group": "ב",
+    "mandatory": false,
+    "waiver": true,
+    "maintenance": 1500
+  },
+  {
+    "occupation": "מנהל/ת מוצר",
+    "group": "ג",
+    "mandatory": false,
+    "waiver": true,
+    "maintenance": 2000
+  },
+  {
+    "occupation": "מנהל/ת פיתוח",
+    "group": "ג",
+    "mandatory": false,
+    "waiver": true,
+    "maintenance": 2000
+  },
+  {
+    "occupation": "מנהל/ת משאבי אנוש",
+    "group": "ג",
+    "mandatory": false,
+    "waiver": true,
+    "maintenance": 2000
+  },
+  {
+    "occupation": "מנהל/ת מחלקה",
+    "group": "ד",
+    "mandatory": false,
+    "waiver": true,
+    "maintenance": 2600
+  },
+  {
+    "occupation": "מנהל/ת חטיבה",
+    "group": "ד",
+    "mandatory": false,
+    "waiver": true,
+    "maintenance": 3000
+  }
+]
