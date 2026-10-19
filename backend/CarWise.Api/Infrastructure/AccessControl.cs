@@ -2,7 +2,7 @@ using System.Net.Http.Headers;
 using System.Text.Json.Nodes;
 namespace CarWise.Api.Infrastructure;
 
-public sealed record Caller(string UserId,string EmployeeId,bool IsAgent,bool IsAdmin=false);
+public sealed record Caller(string UserId,string EmployeeId,bool IsAgent,bool IsAdmin=false,string Email="",string DisplayName="");
 public sealed class AccessControl(HttpClient authClient,bool demoMode)
 {
     public bool DemoMode=>demoMode;
@@ -24,7 +24,7 @@ public sealed class AccessControl(HttpClient authClient,bool demoMode)
         var employee=metadata?["employee_id"]?.GetValue<string>();
         if(string.IsNullOrWhiteSpace(id)||role is not ("employee" or "agent" or "admin")||(role!="admin"&&string.IsNullOrWhiteSpace(employee)))throw new UnauthorizedAccessException();
         if(DateTimeOffset.TryParse(user["banned_until"]?.GetValue<string>(),out var banned)&&banned>DateTimeOffset.UtcNow)throw new UnauthorizedAccessException();
-        return new(id,employee??"",role is "agent" or "admin",role=="admin");
+        return new(id,employee??"",role is "agent" or "admin",role=="admin",user["email"]?.GetValue<string>()??"",user["user_metadata"]?["full_name"]?.GetValue<string>()??"");
     }
     public void Employee(HttpContext context,string id)
     {

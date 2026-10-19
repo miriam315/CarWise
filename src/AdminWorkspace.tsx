@@ -1,0 +1,10 @@
+import {useState} from 'react';
+import {Car,Menu,Settings2,LogOut,Users,ArrowLeft} from 'lucide-react';
+import AdminPanel from './AdminPanel';
+import UserIdentity from './UserIdentity';
+import type {Data} from './types';
+export default function AdminWorkspace({data,onApplied,onSelectEmployee,error}:{data:Data;onApplied:()=>Promise<void>;onSelectEmployee:(id:string)=>void;error:string}){
+ const [open,setOpen]=useState(false),[employee,setEmployee]=useState('');
+ return <div className="app-shell"><aside className={'sidebar '+(open?'open':'')}><div className="brand"><span className="brand-icon"><Car size={23}/></span><span dir="ltr">CarWise.</span></div><div className="workspace-label">מרחב הניהול<span>חשבון מנהל אישי</span></div><nav><button className="active" onClick={()=>setOpen(false)}><Settings2 size={19}/> ניהול המערכת</button></nav><div className="sidebar-divider"/><div className="admin-employee-choice"><h3><Users size={19}/> צפייה בנתוני עובד</h3><p>בחרו עובד לצפייה בחישוב ובשיחה שלו. החשבון המחובר נשאר חשבון המנהל.</p><label>עובד לצפייה<select aria-label="עובד לצפייה" value={employee} onChange={e=>setEmployee(e.target.value)}><option value="">בחירת עובד</option>{data.employees.map(e=><option key={e.id} value={e.id}>{e.name} · {e.id}</option>)}</select></label><button className="outline-button" disabled={!employee} onClick={()=>onSelectEmployee(employee)}>פתיחת תצוגת העובד <ArrowLeft size={17}/></button></div></aside>{open&&<div className="sidebar-shade" onClick={()=>setOpen(false)}/>}
+ <div className="main-shell"><header className="topbar"><div className="breadcrumb"><button className="mobile-menu icon-button" aria-label="פתיחת תפריט" onClick={()=>setOpen(!open)}><Menu size={22}/></button><strong>ניהול המערכת</strong></div><div className="header-actions"><UserIdentity user={data.currentUser}/><button className="icon-button" aria-label="יציאה מהחשבון" onClick={()=>{sessionStorage.removeItem('carwise-access-token');location.reload()}}><LogOut size={20}/></button></div></header><main>{error&&<p className="error-banner" role="alert">{error}</p>}<AdminPanel onApplied={onApplied}/></main></div></div>;
+}

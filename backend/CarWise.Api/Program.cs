@@ -197,7 +197,10 @@ app.MapPost("/api/auth/login",async(LoginRequest request,AccessControl access,Ca
 }).WithMetadata(new Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute("login"));
 app.MapGet("/api/data",async(HttpContext context,ConfigurationSnapshot snapshot,AccessControl access,SecretVault vault,CancellationToken ct)=>{
     var reference=snapshot.Data;var payslipStatus=await PayslipAvailability.ReadAsync(snapshot.Document.Configuration.Ai,vault,ct);
-    return new{
+    var caller=context.Items["caller"] as Caller;
+    var currentUser=new{userId=caller?.UserId??"demo",email=caller?.Email??"",displayName=caller?.DisplayName??"",
+        role=demo?"demo":caller?.IsAdmin==true?"admin":caller?.IsAgent==true?"agent":"employee",employeeId=caller?.EmployeeId};
+    return new{currentUser,
     cars=reference.Cars.Select(reference.Enrich),employees=reference.Employees.Where(e=>demo || context.Items["caller"] is Caller c && (c.IsAdmin||e.Id==c.EmployeeId)),
     occupations=reference.OccupationDocuments,rules=reference.Rules,officialCount=reference.OfficialRowCount,canAdmin=access.CanAdmin(context),canAgent=demo||context.Items["caller"] is Caller{IsAgent:true},configurationRevision=snapshot.Document.Revision,payslipEnabled=payslipStatus.Enabled,payslipStatus};
 });

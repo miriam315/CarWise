@@ -12,6 +12,7 @@ public sealed class ConfigurationValidator(ReferenceData officialSource)
             if(JsonDefaults.Serialize(config).Length>1_000_000)Fail("קובץ ההגדרות גדול מדי");
             if(config.Cars.Count is <1 or >500 || config.Occupations.Count is <1 or >500 || config.Employees.Count is <1 or >5000)
                 Fail("נדרשים קטלוג, עיסוקים ועובדים; הרשימות חורגות מהגודל המותר");
+            if(config.Employees.Any(e=>string.IsNullOrWhiteSpace(e.Name)))Fail("יש להזין שם לכל פרופיל עובד לפני שמירה");
             Unique(config.Cars.Select(c=>c.Id),"מזהי רכב");Unique(config.Employees.Select(e=>e.Id),"מזהי עובד");
             Unique(config.Occupations.Select(o=>o["occupation"].GetString()!),"עיסוקים");
             var rules=config.Rules;var groups=rules["groupOrder"]!.AsArray().Select(x=>x!.GetValue<string>()).ToList();
@@ -107,7 +108,8 @@ public sealed class ConfigurationValidator(ReferenceData officialSource)
         if(profile.DisplayName is null||profile.DisplayName.Length>100)Fail("שם ספק ארוך מדי");
         if(profile.Provider is not ("openai" or "compatible" or "anthropic" or "gemini"))Fail("ספק AI לא נתמך");
         if(string.IsNullOrWhiteSpace(profile.Model)||profile.Model.Length>160||!Regex.IsMatch(profile.Model,@"^[A-Za-z0-9_./:@-]+$"))Fail("שם מודל לא תקין");
-        if(profile.MaxOutputTokens is <128 or >8192 || profile.TimeoutSeconds is <5 or >90)Fail("מגבלת פלט או זמן המתנה מחוץ לטווח");
+        if(profile.MaxOutputTokens is <128 or >8192)Fail("מגבלת הפלט חייבת להיות בין 128 ל־8,192 טוקנים");
+        if(profile.TimeoutSeconds is <5 or >90)Fail("זמן ההמתנה חייב להיות בין 5 ל־90 שניות");
         if(!Uri.TryCreate(profile.BaseUrl,UriKind.Absolute,out var uri)||uri.Scheme!="https"||!uri.IsDefaultPort||!string.IsNullOrEmpty(uri.UserInfo)||!string.IsNullOrEmpty(uri.Query)||!string.IsNullOrEmpty(uri.Fragment))Fail("כתובת AI חייבת להיות HTTPS ללא פרטי גישה, פורט או פרמטרים");
         var allowed=new Dictionary<string,string[]>{["openai"]=["api.openai.com"],["anthropic"]=["api.anthropic.com"],["gemini"]=["generativelanguage.googleapis.com"],
             ["compatible"]=["api.openai.com","api.groq.com","api.mistral.ai","openrouter.ai","api.deepseek.com","api.together.xyz","api.fireworks.ai"]};
