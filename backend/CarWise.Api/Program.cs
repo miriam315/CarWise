@@ -195,9 +195,12 @@ app.MapPost("/api/auth/login",async(LoginRequest request,AccessControl access,Ca
     if(demo)return Results.BadRequest(new{error="מצב הדגמה אינו דורש התחברות"});
     return Results.Ok(await access.LoginAsync(request.Email,request.Password,ct));
 }).WithMetadata(new Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute("login"));
-app.MapGet("/api/data",(HttpContext context,ReferenceData reference,AccessControl access)=>new{
+app.MapGet("/api/data",async(HttpContext context,ConfigurationSnapshot snapshot,AccessControl access,SecretVault vault,CancellationToken ct)=>{
+    var reference=snapshot.Data;var payslipStatus=await PayslipAvailability.ReadAsync(snapshot.Document.Configuration.Ai,vault,ct);
+    return new{
     cars=reference.Cars.Select(reference.Enrich),employees=reference.Employees.Where(e=>demo || context.Items["caller"] is Caller c && (c.IsAdmin||e.Id==c.EmployeeId)),
-    occupations=reference.OccupationDocuments,rules=reference.Rules,officialCount=reference.OfficialRowCount,canAdmin=access.CanAdmin(context),canAgent=demo||context.Items["caller"] is Caller{IsAgent:true},configurationRevision=state.Current.Document.Revision,payslipEnabled=state.Current.Document.Configuration.Ai.Enabled&&state.Current.Document.Configuration.Ai.PayslipEnabled});
+    occupations=reference.OccupationDocuments,rules=reference.Rules,officialCount=reference.OfficialRowCount,canAdmin=access.CanAdmin(context),canAgent=demo||context.Items["caller"] is Caller{IsAgent:true},configurationRevision=snapshot.Document.Revision,payslipEnabled=payslipStatus.Enabled,payslipStatus};
+});
 void AuthorizeEmployee(HttpContext context,AccessControl access,Employee employee)
 {
     access.Employee(context,employee.Id);

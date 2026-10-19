@@ -44,12 +44,14 @@ public static class PayslipExtraction
     }
     public static void MapPayslips(this WebApplication app)
     {
+        app.MapGet("/api/payslip/status",(ConfigurationSnapshot snapshot,SecretVault vault,CancellationToken ct)=>PayslipAvailability.ReadAsync(snapshot.Document.Configuration.Ai,vault,ct));
         app.MapPost("/api/payslip/extract",async(HttpContext context,ConfigurationSnapshot snapshot,AccessControl access,SecretVault vault,IHttpClientFactory clients,UsageAccounting accounting,AiKeyHealth health,AiOperationContext operation,CancellationToken ct)=>{
             var employee=context.Request.Query["employee"].ToString();access.Employee(context,employee);
             if(!snapshot.Data.Employees.Any(e=>e.Id==employee))throw new ArgumentException("לא נמצא פרופיל עובד");
             if(context.Request.Query["consent"]!="true")throw new ArgumentException("נדרש אישור להעברת התלוש לספק החילוץ");
             var ai=snapshot.Document.Configuration.Ai;
-            if(!ai.Enabled||!ai.PayslipEnabled)throw new ArgumentException("חילוץ תלושים לא הופעל בניהול. נדרשים ספק ומודל תומכי PDF/תמונה ומפתח תקף.");
+            var status=await PayslipAvailability.ReadAsync(ai,vault,ct);
+            if(!status.Enabled)throw new ArgumentException(status.Message);
             operation.ConversationId=employee;
             var bytes=await UploadReader.ReadAsync(context,8*1024*1024,ct);
             try

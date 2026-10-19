@@ -46,6 +46,27 @@ def check(page,query,nav,screenshots):
  assert not page.evaluate('document.documentElement.scrollWidth > innerWidth')
  page.screenshot(path=str(screenshots/'ai-models-mobile.png'),full_page=True)
  page.set_viewport_size({'width':1440,'height':1100})
+ # Payslip activation is independent from conversation AI and uses the same readiness in both UIs.
+ page.get_by_role('tab',name='פרומפטים ותלושים',exact=True).click()
+ page.get_by_label('הפעלת חילוץ תלושים').check()
+ expect(page.get_by_text('השינוי עדיין בטיוטה.',exact=False)).to_be_visible()
+ page.get_by_label('סיבת שינוי הגדרות').fill('enable payslips while conversation AI stays off')
+ page.get_by_role('button',name='שמירה והפעלה',exact=True).click();expect(page.locator('.admin-success')).to_contain_text('נשמרו והופעלו')
+ assert query('/admin/configuration')['configuration']['ai']['enabled'] is False
+ assert query('/data')['payslipEnabled'] and query('/payslip/status')['code']=='ready'
+ nav('הנתונים שלי');expect(page.get_by_label('העלאת תלוש שכר')).to_have_count(1)
+ # An invalid file must reach file validation rather than being blocked by the chat toggle; no provider call.
+ rejected=page.request.post(page.url.rstrip('/')+'/api/payslip/extract?employee=E-001&consent=true',data=b'not a payroll document',headers={'Content-Type':'application/octet-stream'})
+ assert rejected.status==400 and 'PDF' in rejected.json()['error']
+ nav('ניהול המערכת');page.get_by_role('tab',name='פרומפטים ותלושים',exact=True).click()
+ page.get_by_label('הפעלת חילוץ תלושים').uncheck();page.get_by_label('סיבת שינוי הגדרות').fill('disable payslips independently')
+ page.get_by_role('button',name='שמירה והפעלה',exact=True).click();expect(page.locator('.admin-success')).to_contain_text('נשמרו והופעלו')
+ nav('הנתונים שלי');expect(page.get_by_text('חילוץ תלושים כבוי בהגדרות השמורות.',exact=False)).to_be_visible()
+ assert page.get_by_label('העלאת תלוש שכר').count()==0
+ # Simulate a saved administrator change while the worker's page is already open.
+ latest=query('/admin/configuration');latest['configuration']['ai']['payslipEnabled']=True
+ saved=query('/admin/configuration',{'expectedRevision':latest['revision'],'configuration':latest['configuration'],'note':'another administrator enables documents'})
+ page.get_by_role('button',name='בדיקת זמינות מחדש',exact=True).click();expect(page.get_by_label('העלאת תלוש שכר')).to_have_count(1)
  restored=query('/admin/restore',{'expectedRevision':saved['revision'],'revision':baseline_revision,'note':'restore original models after isolated browser check'})
  page.reload();page.wait_for_selector('.vehicle-card');nav('ניהול המערכת')
  print('PASS: model catalogue UI, independent PDF binding, shared conversation binding, encrypted primary/backup keys, disabled keys, persistence and mobile layout; no paid calls.')

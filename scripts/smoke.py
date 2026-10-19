@@ -177,6 +177,7 @@ with tempfile.TemporaryDirectory(prefix='carwise-smoke-') as temp:
    page.route('**/api/data',mock_data)
    fields={key:{'value':None,'evidence':None} for key in ['salary','commission','bonus','pension','fund','credits','participation']}
    fields['salary']={'value':19000,'evidence':'שכר בסיס 19,000'};fields['pension']={'value':6,'evidence':'פנסיית עובד 6%'}
+   page.route('**/api/payslip/status',lambda route:route.fulfill(json={'enabled':True,'code':'ready','message':'Synthetic test readiness'}))
    page.route('**/api/payslip/extract?*',lambda route:route.fulfill(json={'fields':fields,'warnings':['Synthetic test response; employee review required.'],'configurationRevision':admin_revision}))
    page.reload();page.wait_for_selector('.vehicle-card');nav('הנתונים שלי')
    before_salary=page.get_by_label('שכר בסיס חודשי (₪)',exact=True).input_value()
@@ -191,7 +192,7 @@ with tempfile.TemporaryDirectory(prefix='carwise-smoke-') as temp:
    page.get_by_role('button',name='שמירה וחישוב מחדש',exact=True).click();page.wait_for_selector('.vehicle-card')
    assert request('/conversation/E-001')['employee']['salary']==19000
    nav('הנתונים שלי');page.get_by_role('button',name='איפוס לדוגמה').click();page.get_by_role('button',name='שמירה וחישוב מחדש').click();page.wait_for_selector('.vehicle-card')
-   page.unroute('**/api/data',mock_data);page.unroute('**/api/payslip/extract?*')
+   page.unroute('**/api/data',mock_data);page.unroute('**/api/payslip/extract?*');page.unroute('**/api/payslip/status')
    nav('הסקירה שלי')
    page.set_viewport_size({'width':390,'height':844});page.wait_for_timeout(350);page.screenshot(path=str(screenshots/'mobile.png'),full_page=True)
    assert not page.evaluate('document.documentElement.scrollWidth > innerWidth')
