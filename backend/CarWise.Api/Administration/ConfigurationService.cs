@@ -4,7 +4,7 @@ using CarWise.Api.AI;
 using CarWise.Api.Infrastructure;
 namespace CarWise.Api.Administration;
 
-public sealed class ConfigurationService(IJsonDatabase database,ConfigurationState state,ConfigurationValidator validator,SecretVault vault,OfficialVersions? versions=null,AiKeyHealth? keyHealth=null)
+public sealed class ConfigurationService(IJsonDatabase database,ConfigurationState state,ConfigurationValidator validator,SecretVault vault,OfficialVersions? versions=null,AiKeyHealth? keyHealth=null,ILocalPayslipOcr? localOcr=null)
 {
     private readonly SemaphoreSlim gate=new(1,1);
     public ConfigurationState State=>state;
@@ -32,7 +32,7 @@ public sealed class ConfigurationService(IJsonDatabase database,ConfigurationSta
         return new{current.Revision,current.SavedAt,current.Actor,current.Note,current.Configuration,
             history=current.History.Select(h=>new{h.Revision,h.SavedAt,h.Actor,h.Note}),
             keyStatus=new{extraction=await HasKeyAsync(current.Configuration.Ai.ProfileFor("extraction"),ct),narration=await HasKeyAsync(current.Configuration.Ai.ProfileFor("narration"),ct)},
-            keyPools=pools,payslipStatus=await PayslipAvailability.ReadAsync(current.Configuration.Ai,vault,ct)};
+            keyPools=pools,payslipStatus=await PayslipAvailability.ReadAsync(current.Configuration.Ai,localOcr,ct)};
     }
     private async Task<bool> HasKeyAsync(AiProfile profile,CancellationToken ct)
     {
@@ -90,10 +90,9 @@ public sealed class ConfigurationService(IJsonDatabase database,ConfigurationSta
                 }
             }
             var validated=validator.Validate(config,await OfficialAsync(config,ct));config=config with{Employees=validated.Employees};
-            var services=new List<string>();if(config.Ai.Enabled)services.AddRange(["extraction","narration"]);if(config.Ai.PayslipEnabled)services.Add("payslip");
+            var services=new List<string>();if(config.Ai.Enabled)services.AddRange(["extraction","narration"]);
             foreach(var service in services)
-                if(!await HasKeyAsync(config.Ai.ProfileFor(service),ct))throw new ArgumentException(service=="payslip"?
-                    "להפעלת חילוץ תלושים יש להגדיר ולשמור מפתח פעיל למודל קריאת התלושים בניהול ← ספקי AI.":"הפעלת AI בשיחה דורשת מפתח זמין לכל אחד משירותי השיחה.");
+                if(!await HasKeyAsync(config.Ai.ProfileFor(service),ct))throw new ArgumentException("הפעלת AI בשיחה דורשת מפתח זמין לכל אחד משירותי השיחה.");
             var history=new List<ConfigurationVersion>{new(current.Revision,current.SavedAt,current.Actor,current.Note,current.Configuration)};
             history.AddRange(current.History);history=history.Take(10).ToList();
             var next=new ConfigurationDocument(current.Revision+1,DateTimeOffset.UtcNow,actor,request.Note.Trim(),config,history);

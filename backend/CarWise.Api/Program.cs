@@ -114,6 +114,7 @@ builder.Services.AddScoped(sp=>sp.GetRequiredService<ConfigurationSnapshot>().Da
 builder.Services.AddScoped<PayrollEngine>();
 builder.Services.AddSingleton(repository);builder.Services.AddSingleton(database);
 builder.Services.AddSingleton<AiKeyHealth>();
+builder.Services.AddSingleton<ILocalPayslipOcr>(new LocalPayslipOcr(builder.Configuration,root));
 builder.Services.AddSingleton<SecretVault>();builder.Services.AddSingleton<ConfigurationService>();
 builder.Services.AddHostedService<ConfigurationRefreshWorker>();
 builder.Services.AddSingleton<ExchangeRates>();builder.Services.AddSingleton<UsageReports>();
@@ -195,8 +196,8 @@ app.MapPost("/api/auth/login",async(LoginRequest request,AccessControl access,Ca
     if(demo)return Results.BadRequest(new{error="מצב הדגמה אינו דורש התחברות"});
     return Results.Ok(await access.LoginAsync(request.Email,request.Password,ct));
 }).WithMetadata(new Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute("login"));
-app.MapGet("/api/data",async(HttpContext context,ConfigurationSnapshot snapshot,AccessControl access,SecretVault vault,CancellationToken ct)=>{
-    var reference=snapshot.Data;var payslipStatus=await PayslipAvailability.ReadAsync(snapshot.Document.Configuration.Ai,vault,ct);
+app.MapGet("/api/data",async(HttpContext context,ConfigurationSnapshot snapshot,AccessControl access,ILocalPayslipOcr ocr,CancellationToken ct)=>{
+    var reference=snapshot.Data;var payslipStatus=await PayslipAvailability.ReadAsync(snapshot.Document.Configuration.Ai,ocr,ct);
     var caller=context.Items["caller"] as Caller;
     var currentUser=new{userId=caller?.UserId??"demo",email=caller?.Email??"",displayName=caller?.DisplayName??"",
         role=demo?"demo":caller?.IsAdmin==true?"admin":caller?.IsAgent==true?"agent":"employee",employeeId=caller?.EmployeeId};

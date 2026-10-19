@@ -173,7 +173,7 @@ public sealed class AiRoutingTests
         Assert.Equal(new[]{profile.Model,profile.Model,"document-model"},sentModels);
         var broken=ai with{ServiceModels=new(ai.ServiceModels){{"unknown-service","pdf-model"}}};
         Assert.Throws<ArgumentException>(()=>new ConfigurationValidator(Source).Validate(config with{Ai=broken}));
-        broken=ai with{Models=[ai.Models[0]],ServiceModels=ai.ServiceModels};Assert.Throws<ArgumentException>(()=>new ConfigurationValidator(Source).Validate(config with{Ai=broken}));
-        broken=ai with{Models=ai.Models.Select(m=>m with{Profile=m.Profile with{SupportsDocuments=false}}).ToList()};Assert.Throws<ArgumentException>(()=>new ConfigurationValidator(Source).Validate(config with{Ai=broken}));
+        broken=ai with{Models=[ai.Models[0]],ServiceModels=ai.ServiceModels};new ConfigurationValidator(Source).Validate(config with{Ai=broken}); // Historical payslip bindings are no longer used.
+        broken=ai with{Models=ai.Models.Select(m=>m with{Profile=m.Profile with{SupportsDocuments=false}}).ToList()};new ConfigurationValidator(Source).Validate(config with{Ai=broken}); // Local OCR does not depend on provider document support.
     }
 }

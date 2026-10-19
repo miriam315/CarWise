@@ -44,6 +44,8 @@ def check(base,query,settings,service_token):
   employee=page.evaluate("sessionStorage.getItem('carwise-access-token')");own=authorized('/data',employee);assert len(own['employees'])==1 and own['employees'][0]['id']==new_employee and not own['canAdmin'] and not own['canAgent']
   expect(page.locator('.sidebar nav').get_by_role('button',name='ניהול המערכת',exact=False)).to_have_count(0);expect(page.locator('.sidebar nav').get_by_role('button',name='מרכז הנציגים',exact=False)).to_have_count(0)
   denied('/conversation/E-002',employee,403);denied('/admin/configuration',employee,403);denied('/admin/server-connection',employee,403)
+  denied('/payslip/extract?employee=E-002&consent=true',employee,403,{})
+  denied('/payslip/status','invalid-user-token',401)
   denied('/data','invalid-user-token',401)
   screenshots=Path(__file__).resolve().parent.parent/'.local/screenshots';screenshots.mkdir(parents=True,exist_ok=True)
   page.get_by_role('button',name='יציאה מהחשבון',exact=True).click();page.get_by_role('tab',name='כניסת מנהל',exact=True).click();page.screenshot(path=str(screenshots/'admin-login.png'),full_page=True)

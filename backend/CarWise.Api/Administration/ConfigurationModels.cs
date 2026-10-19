@@ -25,6 +25,13 @@ public sealed record AiBackupKey(string Id,string Name,string KeyReference,bool 
 public sealed record AiModelPrice(string Provider,string Host,string Model,decimal InputUsdPerMillion,
     decimal CachedInputUsdPerMillion,decimal OutputUsdPerMillion,decimal? CacheWriteUsdPerMillion,string Source);
 public sealed record AiRegisteredModel(string Id,string Name,AiProfile Profile);
+public sealed record LocalPayslipSettings
+{
+    public string Languages {get;init;}="heb+eng";
+    public int MaxPages {get;init;}=3;
+    public int TimeoutSeconds {get;init;}=60;
+    public int MinimumConfidence {get;init;}=75;
+}
 public sealed record AiConfiguration(bool Enabled,AiProfile Extraction,AiProfile Narration)
 {
     public List<AiRegisteredModel> Models {get;init;}=[];
@@ -41,6 +48,7 @@ public sealed record AiConfiguration(bool Enabled,AiProfile Extraction,AiProfile
     public string NarrationPrompt {get;init;}="כתוב בעברית ברורה, חמה וקצרה, והסבר לעובד את החלופה.";
     public string PayslipPrompt {get;init;}="חלץ רכיבי שכר חודשיים בלבד. הבחֵן בין שכר בסיס לברוטו ובין הפרשת עובד להפרשת מעסיק. אל תסיק אחוזים מסכומי ניכוי.";
     public bool PayslipEnabled {get;init;}=false;
+    public LocalPayslipSettings PayslipOcr {get;init;}=new();
     public List<AiModelPrice> Pricing {get;init;}=[];
     public bool DailyExchangeRateEnabled {get;init;}=true;
     public int ExchangeRateUpdateHourUtc {get;init;}=17;

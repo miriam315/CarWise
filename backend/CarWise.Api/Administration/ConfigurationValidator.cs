@@ -84,9 +84,11 @@ public sealed class ConfigurationValidator(ReferenceData officialSource)
                 Unique(config.Ai.Models.Select(m=>m.Id),"מודלי AI");
                 foreach(var model in config.Ai.Models)
                     if(!Regex.IsMatch(model.Id,@"^[a-z0-9-]{1,50}$")||string.IsNullOrWhiteSpace(model.Name)||model.Name.Length>100)Fail("שם או מזהה מודל לא תקין");
-                if(config.Ai.ServiceModels!.Count!=3||new[]{"extraction","narration","payslip"}.Any(service=>!config.Ai.ServiceModels.TryGetValue(service,out var id)||!config.Ai.Models.Any(m=>m.Id==id)))Fail("יש לבחור מודל קיים לכל שירות AI");
-                if(config.Ai.PayslipEnabled&&!config.Ai.ProfileFor("payslip").SupportsDocuments)Fail("לחילוץ תלושים יש לבחור מודל המסומן כתומך PDF ותמונות");
+                if(config.Ai.ServiceModels!.Count is <2 or >3||config.Ai.ServiceModels.Keys.Any(key=>key is not ("extraction" or "narration" or "payslip"))||new[]{"extraction","narration"}.Any(service=>!config.Ai.ServiceModels.TryGetValue(service,out var id)||!config.Ai.Models.Any(m=>m.Id==id)))Fail("יש לבחור מודל קיים לכל שירות AI");
             }
+            var ocr=config.Ai.PayslipOcr;
+            if(ocr is null||ocr.Languages is not ("heb+eng" or "heb" or "eng")||ocr.MaxPages is <1 or >6||ocr.TimeoutSeconds is <10 or >120||ocr.MinimumConfidence is <50 or >100)
+                Fail("הגדרות OCR מקומי: שפות heb+eng / heb / eng, עד 1–6 עמודים, זמן המתנה 10–120 שניות וסף זיהוי 50–100");
             foreach(var model in config.Ai.RegisteredModels())
                 try{ValidateAi(model.Profile);}
                 catch(ArgumentException error){throw new ArgumentException($"מודל ״{model.Name}״ ({model.Id}): {error.Message}");}

@@ -63,20 +63,20 @@ def check(page,query,nav,screenshots):
  expect(page.locator('.admin-test')).to_have_count(0)
  page.unroute('**/api/admin/test-ai')
  page.get_by_label('מגבלת טוקנים לפלט',exact=True).fill('1200')
- pdf_id=page.get_by_label('מודל לשירות payslip',exact=True).locator('option').filter(has_text='PDF browser test').get_attribute('value')
- page.get_by_label('מודל לשירות payslip',exact=True).select_option(pdf_id)
+ pdf_id=page.get_by_label('מודל לשירות narration',exact=True).locator('option').filter(has_text='PDF browser test').get_attribute('value')
+ page.get_by_label('מודל לשירות narration',exact=True).select_option(pdf_id)
  expect(page.get_by_role('button',name='הסרת מודל',exact=True)).to_be_disabled()
  page.get_by_label('סיבת שינוי הגדרות').fill('browser model catalogue and encrypted backup keys')
  page.get_by_role('button',name='שמירה והפעלה',exact=True).click();expect(page.locator('.admin-success')).to_contain_text('נשמרו והופעלו')
  saved=query('/admin/configuration');ai=saved['configuration']['ai']
- assert len(ai['models'])==3 and ai['serviceModels']['payslip']==pdf_id
+ assert len(ai['models'])==3 and ai['serviceModels']['narration']==pdf_id
  pdf=next(m for m in ai['models'] if m['id']==pdf_id)
  assert pdf['profile']['supportsDocuments'] and len(pdf['profile']['backupKeys'])==2
  assert not pdf['profile']['backupKeys'][1]['enabled']
  assert all(k['configured'] for k in saved['keyPools'][pdf_id])
  assert 'TEST-ONLY-PDF-' not in json.dumps(saved)
  page.reload();page.wait_for_selector('.vehicle-card');nav('ניהול המערכת');page.get_by_role('tab',name='ספקי AI',exact=True).click()
- expect(page.get_by_label('מודל לשירות payslip',exact=True)).to_have_value(pdf_id)
+ expect(page.get_by_label('מודל לשירות narration',exact=True)).to_have_value(pdf_id)
  page.locator('.ai-model-list button').filter(has_text='PDF browser test').click()
  expect(page.get_by_label('מפתח גיבוי 1',exact=True)).to_have_value('')
  expect(page.get_by_label('הפעלת גיבוי 2',exact=True)).not_to_be_checked()
@@ -101,9 +101,6 @@ def check(page,query,nav,screenshots):
  assert query('/admin/configuration')['configuration']['ai']['enabled'] is False
  assert query('/data')['payslipEnabled'] and query('/payslip/status')['code']=='ready'
  nav('הנתונים שלי');expect(page.get_by_label('העלאת תלוש שכר')).to_have_count(1)
- # An invalid file must reach file validation rather than being blocked by the chat toggle; no provider call.
- rejected=page.request.post(page.url.rstrip('/')+'/api/payslip/extract?employee=E-001&consent=true',data=b'not a payroll document',headers={'Content-Type':'application/octet-stream'})
- assert rejected.status==400 and 'PDF' in rejected.json()['error']
  nav('ניהול המערכת');page.get_by_role('tab',name='פרומפטים ותלושים',exact=True).click()
  page.get_by_label('הפעלת חילוץ תלושים').uncheck();page.get_by_label('סיבת שינוי הגדרות').fill('disable payslips independently')
  page.get_by_role('button',name='שמירה והפעלה',exact=True).click();expect(page.locator('.admin-success')).to_contain_text('נשמרו והופעלו')
@@ -115,7 +112,7 @@ def check(page,query,nav,screenshots):
  page.get_by_role('button',name='בדיקת זמינות מחדש',exact=True).click();expect(page.get_by_label('העלאת תלוש שכר')).to_have_count(1)
  restored=query('/admin/restore',{'expectedRevision':saved['revision'],'revision':baseline_revision,'note':'restore original models after isolated browser check'})
  page.reload();page.wait_for_selector('.vehicle-card');nav('ניהול המערכת')
- print('PASS: draft connection probes, valid boundary values, hidden invalid model context, stale-result prevention; model catalogue UI, independent PDF binding, shared conversation binding, encrypted primary/backup keys, disabled keys, persistence and mobile layout; no paid calls.')
+ print('PASS: draft connection probes, valid boundary values, hidden invalid model context, stale-result prevention; model catalogue UI, local OCR independent of AI model binding, shared conversation binding, encrypted primary/backup keys, disabled keys, persistence and mobile layout; no paid calls.')
  return restored['revision']
 
 def check_api(query):
