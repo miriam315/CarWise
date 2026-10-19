@@ -83,8 +83,8 @@ public static class AdminEndpoints
             if(preview.Missing.Count>0)throw new ArgumentException("לא ניתן להפעיל מאגר: חסרות התאמות לרכבי הקטלוג. עדכנו את הקטלוג או העלו קובץ מלא.");
             await settings.SaveAsync(new(request.ExpectedRevision,configuration,request.Note),Actor(context),ct);return await settings.ViewAsync(ct);
         });
-        group.MapGet("/official",async(string? q,int? page,string? version,ReferenceData source,OfficialVersions versions,CancellationToken ct)=>{
-            var official=version is null?source.Official:await versions.LoadAsync(version,ct);var taxYear=official.Values.First().TaxYear;
+        group.MapGet("/official",async(string? q,int? page,string? version,ReferenceData source,ConfigurationSnapshot snapshot,OfficialVersions versions,CancellationToken ct)=>{
+            var official=await versions.LoadAsync(version??snapshot.Document.Configuration.OfficialVersionId,ct);var taxYear=official.Values.First().TaxYear;
             var query=(q??"").Trim();if(query.Length>100)throw new ArgumentException("החיפוש ארוך מדי");
             var number=page??0;if(number<0||number>10000)throw new ArgumentException("עמוד לא תקין");
             var rows=official.Values.Where(r=>r.TaxYear==taxYear && r.VehicleType=="1" &&

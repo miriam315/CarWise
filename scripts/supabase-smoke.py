@@ -77,7 +77,9 @@ try:
      content=response.read();
      if response.code>=400:
       failure=json.loads(content);print('PostgREST diagnostic:',response.code,failure.get('code'),failure.get('message'))
-     self.send_response(response.code);self.send_header('Content-Type','application/json');self.send_header('Content-Length',str(len(content)));self.end_headers();self.wfile.write(content)
+     self.send_response(response.code);self.send_header('Content-Type','application/json');self.send_header('Content-Length',str(len(content)));
+     if response.headers.get('Content-Range'):self.send_header('Content-Range',response.headers['Content-Range'])
+     self.end_headers();self.wfile.write(content)
   proxy=ThreadingHTTPServer(('127.0.0.1',55434),Gateway);Thread(target=proxy.serve_forever,daemon=True).start()
   env.update({'SUPABASE_URL':'http://127.0.0.1:55434' ,'CARWISE_SUPABASE_KEY':service_token,'ASPNETCORE_URLS':base})
   with (ROOT/'.local/rest-smoke-server.log').open('w') as log:

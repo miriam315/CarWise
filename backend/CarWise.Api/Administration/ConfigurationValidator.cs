@@ -97,7 +97,7 @@ public sealed class ConfigurationValidator(ReferenceData officialSource)
                 if(new[]{price.InputUsdPerMillion,price.CachedInputUsdPerMillion,price.OutputUsdPerMillion,price.CacheWriteUsdPerMillion??0}.Any(v=>v<0||v>100000)
                     ||price.CachedInputUsdPerMillion>price.InputUsdPerMillion||string.IsNullOrWhiteSpace(price.Source)||price.Source.Length>500)Fail("תעריף מודל או מקור אינו תקין");
             }
-            return new ReferenceData{Rules=data.Rules,Cars=data.Cars,Employees=employees,OccupationDocuments=data.OccupationDocuments,Official=data.Official};
+            return new ReferenceData{Rules=data.Rules,Cars=data.Cars,Employees=employees,OccupationDocuments=data.OccupationDocuments,Official=data.Official,OfficialRowCount=config.OfficialVersionId=="baseline"?officialSource.OfficialRowCount:data.OfficialRowCount};
         }
         catch(Exception error) when(error is InvalidOperationException or KeyNotFoundException or NullReferenceException or InvalidDataException or FormatException)
         {throw new ArgumentException("מבנה הגדרות לא תקין או אי־התאמה למאגר הרשמי. בדקו שדות, קודים וסכומים.");}

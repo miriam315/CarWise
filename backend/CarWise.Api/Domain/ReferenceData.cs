@@ -11,11 +11,13 @@ public sealed class ReferenceData
     public required List<Employee> Employees { get; init; }
     public required List<Dictionary<string, JsonElement>> OccupationDocuments { get; init; }
     public required Dictionary<string, OfficialRecord> Official { get; init; }
+    private int? totalOfficialRows;
+    public int OfficialRowCount {get=>totalOfficialRows??Official.Count;init=>totalOfficialRows=value;}
     public int TaxYear => Rules["valueOfUse"]?["taxYear"]?.GetValue<int>() ?? 2026;
-    public static ReferenceData FromSnapshot(DatabaseSnapshot snapshot)
+    public static ReferenceData FromSnapshot(DatabaseSnapshot snapshot,int? officialRowCount=null)
     {
         var data = new ReferenceData { Rules=snapshot.Rules, Cars=snapshot.Cars, Employees=snapshot.Employees,
-            OccupationDocuments=snapshot.Occupations, Official=snapshot.Official.ToDictionary(x=>x.Key) };
+            OccupationDocuments=snapshot.Occupations, Official=snapshot.Official.ToDictionary(x=>x.Key),OfficialRowCount=officialRowCount??snapshot.Official.Count };
         data.Verify(); return data;
     }
     public DatabaseSnapshot Snapshot() => new(Rules, Cars, Employees, OccupationDocuments, Official.Values.ToList());

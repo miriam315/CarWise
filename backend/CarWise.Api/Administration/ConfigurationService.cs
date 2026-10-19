@@ -12,7 +12,7 @@ public sealed class ConfigurationService(IJsonDatabase database,ConfigurationSta
     {
         if(config.OfficialVersionId=="baseline"&&versions is null)return Task.FromResult<IReadOnlyDictionary<string,OfficialRecord>?>(null);
         return Load();
-        async Task<IReadOnlyDictionary<string,OfficialRecord>?> Load()=>await (versions??throw new ArgumentException("גרסאות מאגר אינן זמינות")).LoadAsync(config.OfficialVersionId,ct);
+        async Task<IReadOnlyDictionary<string,OfficialRecord>?> Load()=>await (versions??throw new ArgumentException("גרסאות מאגר אינן זמינות")).LoadForCarsAsync(config.OfficialVersionId,config.Cars,ct);
     }
     public async Task RefreshAsync(CancellationToken ct)
     {

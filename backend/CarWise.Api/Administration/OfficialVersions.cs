@@ -82,7 +82,7 @@ public sealed class OfficialVersions(IJsonDatabase database,ReferenceData baseli
     }
     public async Task<List<OfficialVersion>> ListAsync(CancellationToken ct)
     {
-        var versions=new List<OfficialVersion>{new("baseline",baseline.TaxYear,baseline.Official.Count,0,"מאגר מקורי", "",DateTimeOffset.MinValue,"system")};string? after=null;
+        var versions=new List<OfficialVersion>{new("baseline",baseline.TaxYear,baseline.OfficialRowCount,0,"מאגר מקורי", "",DateTimeOffset.MinValue,"system")};string? after=null;
         do
         {
             var rows=await database.ReadAsync("carwise_rules",new Dictionary<string,string>{{"id_prefix","official-version:"}},ct:ct,afterId:after);
@@ -93,7 +93,20 @@ public sealed class OfficialVersions(IJsonDatabase database,ReferenceData baseli
     }
     public async Task<IReadOnlyDictionary<string,OfficialRecord>> LoadAsync(string id,CancellationToken ct)
     {
-        if(id=="baseline")return baseline.Official;
+        if(id=="baseline")
+        {
+            if(baseline.Official.Count==baseline.OfficialRowCount)return baseline.Official;
+            if(cache.TryGetValue(id,out var all))return all;
+            var baselineRecords=new Dictionary<string,OfficialRecord>();string? cursor=null;
+            while(true)
+            {
+                var rows=await database.ReadAsync("carwise_official",limit:250,ct:ct,afterId:cursor);if(rows.Count==0)break;
+                foreach(var row in rows){var record=ReferenceData.ParseOfficial(JsonDefaults.Read<Dictionary<string,string>>(row!["document"]!.ToJsonString()));baselineRecords.Add(record.Key,record);}
+                cursor=rows[^1]!["id"]!.GetValue<string>();
+            }
+            if(baselineRecords.Count!=baseline.OfficialRowCount)throw new InvalidDataException("Official baseline changed; reload the server before continuing.");
+            cache.TryAdd(id,baselineRecords);return baselineRecords;
+        }
         if(!Regex.IsMatch(id,@"^[a-f0-9]{32}$"))throw new ArgumentException("מזהה גרסת מאגר לא תקין");
         if(cache.TryGetValue(id,out var cached))return cached;
         var metadata=await database.ReadAsync("carwise_rules",new Dictionary<string,string>{{"id","official-version:"+id}},ct:ct);
@@ -113,6 +126,14 @@ public sealed class OfficialVersions(IJsonDatabase database,ReferenceData baseli
         }
         if(loadedChunks!=version.Chunks||records.Count!=version.RowCount||records.Values.Any(r=>r.TaxYear!=version.TaxYear))throw new InvalidDataException("גרסת המאגר פגומה");
         if(cache.Count>=3)cache.Clear();cache.TryAdd(id,records);return records;
+    }
+    public async Task<IReadOnlyDictionary<string,OfficialRecord>> LoadForCarsAsync(string id,IEnumerable<Car> cars,CancellationToken ct)
+    {
+        if(id!="baseline")return await LoadAsync(id,ct);
+        var list=cars.ToList();
+        var keys=list.Select(c=>OfficialRecord.KeyFor(baseline.TaxYear,c.Year,"1",c.MakerCode,c.ModelCode)).Distinct().ToArray();
+        if(keys.All(baseline.Official.ContainsKey))return keys.ToDictionary(k=>k,k=>baseline.Official[k]);
+        return await new Repository(database).LoadOfficialForCarsAsync(list,baseline.TaxYear,ct);
     }
     public async Task<(ManagedConfiguration Configuration,OfficialPreview Preview)> PreviewAsync(string id,ManagedConfiguration current,CancellationToken ct,Dictionary<string,OfficialCarReplacement>? replacements=null)
     {

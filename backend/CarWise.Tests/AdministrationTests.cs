@@ -21,7 +21,7 @@ public sealed class MemoryConfigurationDatabase : IJsonDatabase
         lock(gate)
         {
             var query=rows.Where(r=>(filters is null || filters.All(f=>f.Key switch{
-                "id"=>r.Key==f.Value,"id_prefix"=>r.Key.StartsWith(f.Value,StringComparison.Ordinal),
+                "id"=>r.Key==f.Value,"id_in"=>f.Value.Split(',').Contains(r.Key),"id_prefix"=>r.Key.StartsWith(f.Value,StringComparison.Ordinal),
                 "document->>conversationId"=>r.Value["conversationId"]?.GetValue<string>()==f.Value,_=>false}))
                 &&(afterId is null||string.CompareOrdinal(r.Key,afterId)>0)).OrderBy(r=>r.Key);
             return Task.FromResult(new JsonArray(query.Skip(offset).Take(limit).Select(r=>(JsonNode)new JsonObject{["id"]=r.Key,["document"]=r.Value.DeepClone()}).ToArray()));

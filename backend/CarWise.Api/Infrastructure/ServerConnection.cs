@@ -86,8 +86,13 @@ public sealed class ServerConnectionManager(ServerConnectionStore store,ServerCo
             var db=new SupabaseDatabase(client);
             var rules=await db.ReadAsync("carwise_rules",new Dictionary<string,string>{{"id","active"}},limit:1,ct:ct);
             var cars=await db.ReadAsync("carwise_cars",limit:1,ct:ct);
-            if(rules.Count!=1||cars.Count==0)throw new ArgumentException("החיבור זמין, אך נתוני CarWise חסרים בפרויקט. יש להכין את הסכמה ולייבא את נתוני המערכת לפני שמירת החיבור.");
+            var official=await db.ReadAsync("carwise_official",limit:1,ct:ct);
+            if(rules.Count!=1||cars.Count==0||official.Count==0)throw new ArgumentException("החיבור זמין, אך נתוני CarWise חסרים בפרויקט. יש להכין את הסכמה ולייבא את נתוני המערכת לפני שמירת החיבור.");
         }
+        catch(SupabaseRequestException error)when(error.Status is 401 or 403)
+        {throw new ArgumentException("Supabase דחה את מפתח השרת או את הרשאותיו. בדקו שהמפתח שייך לפרויקט הזה ושהוא Secret/service_role בעל הרשאות לסכמת CarWise.");}
+        catch(SupabaseRequestException error)when(error.Status==404)
+        {throw new ArgumentException("לא נמצאה סכמת CarWise בפרויקט. יש להחיל את מיגרציית המסד לפני שמירת החיבור.");}
         catch(Exception error)when(error is HttpRequestException or TaskCanceledException or InvalidOperationException or System.Text.Json.JsonException)
         {throw new ArgumentException("בדיקת Supabase נכשלה. בדקו כתובת, מפתח שרת, הרשאת רשת וקיום סכמת CarWise. החיבור הקודם לא הוחלף.");}
         await store.SaveAsync(new(uri.ToString().TrimEnd('/'),key),request.ExpectedRevision,actor,ct);

@@ -88,12 +88,19 @@ ReferenceData reference;
 try
 {
     if(database is PostgresDatabase && !await repository.HasReferenceDataAsync())await repository.SeedAsync(ReferenceData.FromFiles(dataPath));
-    reference=await StartupProgress.RunAsync("Loading reference data from "+repository.Provider,ct=>repository.LoadAsync(ct,count=>Console.WriteLine($"[CarWise] Official vehicle records loaded: {count:N0}")),startupTimeout);
+    reference=await StartupProgress.RunAsync("Loading reference data from "+repository.Provider,ct=>repository.LoadAsync(ct,count=>Console.WriteLine($"[CarWise] Catalogue official records loaded: {count:N0} (bulk database download is skipped)")),startupTimeout);
 }
 catch(Exception error)when(database is SupabaseDatabase)
 {
     Console.Error.WriteLine(error is TimeoutException or OperationCanceledException?"[CarWise] Supabase startup timed out. Check the connection/network in the local setup page.":"[CarWise] Supabase reference data could not be loaded. Open localhost to check or replace the saved connection.");
-    await InitialSetup.RunAsync(builder,root,connectionManager,"טעינת הנתונים מ־Supabase לא הושלמה. החיבור השמור לא נמחק. בדקו גישה לפרויקט ולרשת, ונסו שוב באמצעות בדיקת החיבור והשמירה. אין צורך להזין מחדש מפתח שכבר נשמר.");return;
+    var reason=error is SupabaseRequestException {Status:401 or 403}?
+        "Supabase דחה את המפתח או את הרשאותיו. יש לבדוק שהמפתח שייך לפרויקט הנכון ושהוא מפתח שרת בעל הרשאות לנתוני CarWise.":
+        error is SupabaseRequestException {Status:404}?
+        "טבלאות CarWise לא נמצאו בפרויקט Supabase. יש להחיל את מיגרציית המסד ולייבא את נתוני המערכת.":
+        error is OperationCanceledException or TimeoutException or HttpRequestException?
+        "החיבור ל־Supabase לא השלים את הבקשה בזמן. המפתח השמור לא נמחק; בדקו שהפרויקט פעיל ושהרשת מאפשרת גישה אליו, ואז נסו שוב ללא הזנה חוזרת של המפתח.":
+        "לא ניתן לטעון את נתוני CarWise. בדקו שהסכמה ונתוני המקור יובאו ושרכבי הקטלוג קיימים במאגר הרשמי. החיבור השמור לא נמחק.";
+    await InitialSetup.RunAsync(builder,root,connectionManager,reason);return;
 }
 var defaultProfile=new AiProfile{Model=builder.Configuration["Ai:Model"]??"gpt-4.1-mini",BaseUrl=builder.Configuration["Ai:BaseUrl"]??"https://api.openai.com/v1/"};
 var defaultAi=new AiConfiguration(!string.IsNullOrWhiteSpace(builder.Configuration["CARWISE_AI_API_KEY"]??builder.Configuration["Ai:ApiKey"]),defaultProfile,defaultProfile);
@@ -181,7 +188,7 @@ app.MapGet("/api/runtime",(IDataExtractionService extraction)=>new{server="ASP.N
 app.MapGet("/api/health",async(ReferenceData current,CancellationToken ct)=>
 {
     await repository.HasReferenceDataAsync(ct);
-    return Results.Ok(new{status="ok",records=current.Official.Count,method=$"C# decimal / monthly {current.Rules["netMethod"]!["taxYear"]}",database=repository.Provider});
+    return Results.Ok(new{status="ok",records=current.OfficialRowCount,method=$"C# decimal / monthly {current.Rules["netMethod"]!["taxYear"]}",database=repository.Provider});
 });
 app.MapPost("/api/auth/login",async(LoginRequest request,AccessControl access,CancellationToken ct)=>
 {
@@ -190,7 +197,7 @@ app.MapPost("/api/auth/login",async(LoginRequest request,AccessControl access,Ca
 }).WithMetadata(new Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute("login"));
 app.MapGet("/api/data",(HttpContext context,ReferenceData reference,AccessControl access)=>new{
     cars=reference.Cars.Select(reference.Enrich),employees=reference.Employees.Where(e=>demo || context.Items["caller"] is Caller c && (c.IsAdmin||e.Id==c.EmployeeId)),
-    occupations=reference.OccupationDocuments,rules=reference.Rules,officialCount=reference.Official.Count,canAdmin=access.CanAdmin(context),canAgent=demo||context.Items["caller"] is Caller{IsAgent:true},configurationRevision=state.Current.Document.Revision,payslipEnabled=state.Current.Document.Configuration.Ai.Enabled&&state.Current.Document.Configuration.Ai.PayslipEnabled});
+    occupations=reference.OccupationDocuments,rules=reference.Rules,officialCount=reference.OfficialRowCount,canAdmin=access.CanAdmin(context),canAgent=demo||context.Items["caller"] is Caller{IsAgent:true},configurationRevision=state.Current.Document.Revision,payslipEnabled=state.Current.Document.Configuration.Ai.Enabled&&state.Current.Document.Configuration.Ai.PayslipEnabled});
 void AuthorizeEmployee(HttpContext context,AccessControl access,Employee employee)
 {
     access.Employee(context,employee.Id);
@@ -268,7 +275,7 @@ if(Directory.Exists(dist))
     app.UseStaticFiles(new StaticFileOptions{FileProvider=new PhysicalFileProvider(dist)});
     app.MapFallback((HttpContext context)=>context.Request.Path.StartsWithSegments("/api")?Results.NotFound():Results.File(Path.Combine(dist,"index.html"),"text/html; charset=utf-8"));
 }
-app.Logger.LogInformation("CarWise ASP.NET Core ready: {Provider}, {Records} official records, demo={Demo}",repository.Provider,reference.Official.Count,demo);
+app.Logger.LogInformation("CarWise ASP.NET Core ready: {Provider}, {Records} official records available, {Loaded} catalogue matches loaded, demo={Demo}",repository.Provider,state.Current.Data.OfficialRowCount,state.Current.Data.Official.Count,demo);
 await app.RunAsync();
 
 static string FindRoot()

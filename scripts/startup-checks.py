@@ -9,9 +9,11 @@ class Gateway(BaseHTTPRequestHandler):
  def log_message(self,*args):pass
  def do_GET(self):
   global calls
-  if '/carwise_official?' in self.path:
+  if 'id=gt.' in self.path:body=b'[]'
+  elif '/carwise_official?' in self.path:
    calls+=1;time.sleep(2);body=b'[]'
-  elif '/carwise_rules?' in self.path:body=b'[{"id":"active","document":{}}]'
+  elif '/carwise_cars?' in self.path:body=json.dumps([{'id':c['id'],'document':c} for c in json.loads((ROOT/'data/cars.json').read_text())]).encode()
+  elif '/carwise_rules?' in self.path:body=b'[{"id":"active","document":{"valueOfUse":{"taxYear":2026}}}]'
   else:body=b'[]'
   try:
    self.send_response(200);self.send_header('Content-Type','application/json');self.send_header('Content-Length',str(len(body)));self.end_headers();self.wfile.write(body)

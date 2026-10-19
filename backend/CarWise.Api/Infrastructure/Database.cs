@@ -10,6 +10,11 @@ public interface IJsonDatabase
 {
     string Provider { get; }
     Task<JsonArray> ReadAsync(string table, IReadOnlyDictionary<string,string>? filters=null, int offset=0, int limit=1000, CancellationToken ct=default,string? afterId=null);
+    async Task<int> CountAsync(string table,CancellationToken ct=default)
+    {
+        var count=0;string? after=null;
+        while(true){var rows=await ReadAsync(table,ct:ct,afterId:after);count+=rows.Count;if(rows.Count==0)return count;after=rows[^1]!["id"]!.GetValue<string>();}
+    }
     Task UpsertAsync(string table, JsonArray rows, CancellationToken ct=default);
     Task<JsonNode> RpcAsync(string name, JsonObject parameters, CancellationToken ct=default);
     Task AddMessageAsync(string employee,string role,string text,CancellationToken ct=default);
@@ -21,6 +26,11 @@ public sealed class PostgresDatabase(NpgsqlDataSource source) : IJsonDatabase
     private static readonly HashSet<string> Tables=["carwise_rules","carwise_cars","carwise_occupations","carwise_employees",
         "carwise_official","carwise_tickets","carwise_messages","carwise_conversations"];
     private static string Table(string name) => Tables.Contains(name)?name:throw new ArgumentException("Unknown table");
+    public async Task<int> CountAsync(string table,CancellationToken ct=default)
+    {
+        await using var command=source.CreateCommand($"SELECT count(*) FROM {Table(table)}");
+        return checked((int)(long)(await command.ExecuteScalarAsync(ct))!);
+    }
     public async Task MigrateAsync(string path,CancellationToken ct=default)
     {
         await using var conn=await source.OpenConnectionAsync(ct);
@@ -34,6 +44,8 @@ public sealed class PostgresDatabase(NpgsqlDataSource source) : IJsonDatabase
         await using var command=conn.CreateCommand();
         if(filters is not null) foreach(var (key,value) in filters)
         {
+            if(key=="id_in")
+            {var parameterName="p"+clauses.Count;clauses.Add($"t.id=ANY(@{parameterName})");command.Parameters.AddWithValue(parameterName,value.Split(','));continue;}
             if(key=="document->>conversationId")
             {var cp="p"+clauses.Count;clauses.Add($"t.document->>'conversationId'=@{cp}");command.Parameters.AddWithValue(cp,value);continue;}
             if(key=="id_prefix")
@@ -91,6 +103,8 @@ public sealed class PostgresDatabase(NpgsqlDataSource source) : IJsonDatabase
 }
 
 /// <summary>Supabase PostgREST access. The service-role key stays in this server's HttpClient.</summary>
+public sealed class SupabaseRequestException(int status) : InvalidOperationException($"Supabase request failed ({status}). Check schema and server configuration.")
+{public int Status=>status;}
 public sealed class SupabaseDatabase(HttpClient client) : IJsonDatabase
 {
     public string Provider => "Supabase/PostgreSQL";
@@ -98,7 +112,7 @@ public sealed class SupabaseDatabase(HttpClient client) : IJsonDatabase
     {
         using(request)using(var response=await client.SendAsync(request,ct))
         {
-            if(!response.IsSuccessStatusCode)throw new InvalidOperationException($"Supabase request failed ({(int)response.StatusCode}). Check schema and server configuration.");
+            if(!response.IsSuccessStatusCode)throw new SupabaseRequestException((int)response.StatusCode);
             var raw=await response.Content.ReadAsStringAsync(ct);
             return string.IsNullOrWhiteSpace(raw)?new JsonArray():JsonNode.Parse(raw)!;
         }
@@ -107,7 +121,7 @@ public sealed class SupabaseDatabase(HttpClient client) : IJsonDatabase
     {
         var query=$"rest/v1/{Uri.EscapeDataString(table)}?select=*&order="+(table=="carwise_conversations"?"employee_id":"id")+$".asc&offset={offset}&limit={limit}";
         if(afterId is not null)query+="&id=gt."+Uri.EscapeDataString(afterId);
-        if(filters is not null)foreach(var (key,value) in filters)query+=key=="id_prefix"?"&id=like."+Uri.EscapeDataString(value+"*"):$"&{Uri.EscapeDataString(key)}=eq.{Uri.EscapeDataString(value)}";
+        if(filters is not null)foreach(var (key,value) in filters)query+=key=="id_in"?"&id=in.("+Uri.EscapeDataString(value)+")":key=="id_prefix"?"&id=like."+Uri.EscapeDataString(value+"*"):$"&{Uri.EscapeDataString(key)}=eq.{Uri.EscapeDataString(value)}";
         for(var attempt=0;;attempt++)
         {
             ct.ThrowIfCancellationRequested();
@@ -115,6 +129,18 @@ public sealed class SupabaseDatabase(HttpClient client) : IJsonDatabase
             catch(Exception error)when(attempt==0&&!ct.IsCancellationRequested&&error is OperationCanceledException or HttpRequestException)
             {await Task.Delay(TimeSpan.FromMilliseconds(500),ct);}
         }
+    }
+    public async Task<int> CountAsync(string table,CancellationToken ct=default)
+    {
+        using var request=new HttpRequestMessage(HttpMethod.Get,$"rest/v1/{Uri.EscapeDataString(table)}?select=id&limit=1");
+        request.Headers.TryAddWithoutValidation("Prefer","count=exact");
+        using var response=await client.SendAsync(request,ct);
+        if(!response.IsSuccessStatusCode)throw new SupabaseRequestException((int)response.StatusCode);
+        // PostgREST uses "0-0/77988" without the RFC range unit, so read the raw header.
+        if(!response.Content.Headers.NonValidated.TryGetValues("Content-Range",out var ranges)||
+            !int.TryParse(ranges.Single().Split('/').Last(),out var total)||total<0)
+            throw new InvalidOperationException("Supabase did not return an exact row count.");
+        return total;
     }
     public async Task UpsertAsync(string table,JsonArray rows,CancellationToken ct=default)
     {

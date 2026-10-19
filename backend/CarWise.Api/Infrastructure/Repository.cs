@@ -44,18 +44,25 @@ public sealed class Repository(IJsonDatabase db)
         var cars=(await AllAsync("carwise_cars",ct)).Select(r=>Read<Car>(r["document"]!)).ToList();
         var employees=(await AllAsync("carwise_employees",ct)).Select(r=>Read<Employee>(r["document"]!)).ToList();
         var occupations=(await AllAsync("carwise_occupations",ct)).Select(r=>Read<Dictionary<string,JsonElement>>(r["document"]!)).ToList();
-        var official=new List<OfficialRecord>();
-        string? after=null;
-        while(true)
-        {
-            var rows=await db.ReadAsync("carwise_official",limit:db is SupabaseDatabase?250:1000,ct:ct,afterId:after);
-            if(rows.Count==0)break;
-            after=rows[^1]!["id"]!.GetValue<string>();
-            official.AddRange(rows.Select(r=>ReferenceData.ParseOfficial(Read<Dictionary<string,string>>(r!["document"]!))));
-            if(official.Count==rows.Count||official.Count%10000<rows.Count)officialProgress?.Invoke(official.Count);
-        }
-        return ReferenceData.FromSnapshot(new(rules[0]!["document"]!.DeepClone(),cars,employees,occupations,official));
+        var year=rules[0]!["document"]!["valueOfUse"]!["taxYear"]?.GetValue<int>()??2026;
+        var official=await LoadOfficialForCarsAsync(cars,year,ct);
+        officialProgress?.Invoke(official.Count);
+        var total=await db.CountAsync("carwise_official",ct);
+        return ReferenceData.FromSnapshot(new(rules[0]!["document"]!.DeepClone(),cars,employees,occupations,official.Values.ToList()),total);
     }
+    public async Task<IReadOnlyDictionary<string,OfficialRecord>> LoadOfficialForCarsAsync(IEnumerable<Car> cars,int year,CancellationToken ct)
+    {
+        var records=new Dictionary<string,OfficialRecord>();
+        var keys=cars.Select(c=>OfficialRecord.KeyFor(year,c.Year,"1",c.MakerCode,c.ModelCode)).Distinct().ToArray();
+        foreach(var batch in keys.Chunk(40))
+        {
+            var rows=await db.ReadAsync("carwise_official",new Dictionary<string,string>{{"id_in",string.Join(',',batch)}},limit:batch.Length,ct:ct);
+            foreach(var row in rows){var record=ReferenceData.ParseOfficial(Read<Dictionary<string,string>>(row!["document"]!));records.Add(record.Key,record);}
+        }
+        if(records.Count!=keys.Length)throw new InvalidDataException("Missing official records for catalogue cars.");
+        return records;
+    }
+
     private static Ticket TicketFrom(JsonNode r)=>new(Guid.Parse(r["id"]!.GetValue<string>()),r["employee_id"]!.GetValue<string>(),
         Read<Employee>(r["snapshot"]!),r["target"]!.GetValue<string>(),r["question"]!.GetValue<string>(),r["status"]!.GetValue<string>(),
         r["answer"]?.GetValue<string>(),r["participation"]?.GetValue<decimal>(),DateTimeOffset.Parse(r["created"]!.GetValue<string>(),System.Globalization.CultureInfo.InvariantCulture));

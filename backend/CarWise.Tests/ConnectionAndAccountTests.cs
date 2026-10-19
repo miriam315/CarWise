@@ -43,9 +43,9 @@ public sealed class ConnectionAndAccountTests
             });
             var store=new ServerConnectionStore(Path.Combine(directory,"connection.json"),new EphemeralDataProtectionProvider());
             var manager=new ServerConnectionManager(store,new("https://testproject123.supabase.co",Key),true,()=>factory.CreateClient("test"));
-            await manager.SaveAsync(new("https://testproject123.supabase.co",null,0),"admin",default);Assert.Equal(2,requests);
+            await manager.SaveAsync(new("https://testproject123.supabase.co",null,0),"admin",default);Assert.Equal(3,requests);
             var view=JsonDefaults.Serialize(await manager.ViewAsync(default));Assert.DoesNotContain(Key,view);Assert.Contains("\"persisted\":true",view);
-            await Assert.ThrowsAsync<ArgumentException>(()=>manager.SaveAsync(new("https://anotherproject123.supabase.co",null,1),"admin",default));Assert.Equal(2,requests);
+            await Assert.ThrowsAsync<ArgumentException>(()=>manager.SaveAsync(new("https://anotherproject123.supabase.co",null,1),"admin",default));Assert.Equal(3,requests);
         }
         finally{Directory.Delete(directory,true);}
     }
