@@ -20,11 +20,29 @@ builder.Configuration.AddEnvironmentVariables();
 builder.WebHost.UseUrls(builder.Configuration["ASPNETCORE_URLS"]??"http://0.0.0.0:8000");
 builder.WebHost.ConfigureKestrel(o=>o.Limits.MaxRequestBodySize=2_000_000);
 builder.Services.ConfigureHttpJsonOptions(o=>o.SerializerOptions.PropertyNamingPolicy=JsonNamingPolicy.CamelCase);
-var demo=builder.Environment.IsDevelopment() && builder.Configuration.GetValue("CarWise:DemoMode",true);
-var supabaseUrl=builder.Configuration["SUPABASE_URL"]??builder.Configuration["Supabase:Url"];
-var supabaseKey=builder.Configuration["CARWISE_SUPABASE_KEY"]??builder.Configuration["Supabase:ServiceRoleKey"];
-if(!demo && (string.IsNullOrWhiteSpace(supabaseUrl)||string.IsNullOrWhiteSpace(supabaseKey)))
-    throw new InvalidOperationException("Production requires Supabase configuration and authentication. Configure SUPABASE_URL and CARWISE_SUPABASE_KEY securely.");
+builder.Services.Configure<ForwardedHeadersOptions>(options=>{
+    options.ForwardedHeaders=ForwardedHeaders.XForwardedFor|ForwardedHeaders.XForwardedProto;
+    foreach(var address in (Environment.GetEnvironmentVariable("CARWISE_TRUSTED_PROXIES")??"").Split(',',StringSplitOptions.RemoveEmptyEntries|StringSplitOptions.TrimEntries))
+        options.KnownProxies.Add(System.Net.IPAddress.TryParse(address,out var ip)?ip:throw new InvalidOperationException("Invalid trusted proxy IP"));
+});
+var keyDirectory=Environment.GetEnvironmentVariable("CARWISE_KEYRING_DIR")??Path.Combine(root,".local","admin-keys");
+Directory.CreateDirectory(keyDirectory);
+if(!OperatingSystem.IsWindows())File.SetUnixFileMode(keyDirectory,UnixFileMode.UserRead|UnixFileMode.UserWrite|UnixFileMode.UserExecute);
+var protection=builder.Services.AddDataProtection().SetApplicationName("CarWise.Administration").PersistKeysToFileSystem(new DirectoryInfo(keyDirectory));
+if(OperatingSystem.IsWindows())protection.ProtectKeysWithDpapi();
+var connectionProtection=DataProtectionProvider.Create(new DirectoryInfo(keyDirectory),options=>{options.SetApplicationName("CarWise.Administration");if(OperatingSystem.IsWindows())options.ProtectKeysWithDpapi();});
+var connectionStore=new ServerConnectionStore(Environment.GetEnvironmentVariable("CARWISE_SERVER_SETTINGS_PATH")??Path.Combine(root,".local","server-settings","supabase.protected.json"),connectionProtection);
+var savedConnection=Environment.GetEnvironmentVariable("CARWISE_IGNORE_SAVED_CONNECTION")=="true"?null:(await connectionStore.LoadAsync(CancellationToken.None)).Connection;
+var demo=builder.Environment.IsDevelopment() && builder.Configuration.GetValue("CarWise:DemoMode",false);
+var supabaseUrl=savedConnection?.Url??builder.Configuration["SUPABASE_URL"]??builder.Configuration["Supabase:Url"];
+var supabaseKey=savedConnection?.ServiceKey??builder.Configuration["CARWISE_SUPABASE_KEY"]??builder.Configuration["Supabase:ServiceRoleKey"];
+var connectionManager=new ServerConnectionManager(connectionStore,string.IsNullOrWhiteSpace(supabaseUrl)||string.IsNullOrWhiteSpace(supabaseKey)?null:new(supabaseUrl,supabaseKey),builder.Environment.IsDevelopment());
+builder.Services.AddSingleton(connectionManager);
+if((string.IsNullOrWhiteSpace(supabaseUrl)&&string.IsNullOrWhiteSpace(builder.Configuration.GetConnectionString("CarWise")))||(!demo&&string.IsNullOrWhiteSpace(supabaseUrl))||(!string.IsNullOrWhiteSpace(supabaseUrl)&&string.IsNullOrWhiteSpace(supabaseKey)))
+{
+    if(args.Contains("--import-data"))throw new InvalidOperationException("Configure a database before importing data.");
+    await InitialSetup.RunAsync(builder,root,connectionManager);return;
+}
 HttpClient SupabaseClient()
 {
     var uri=new Uri((supabaseUrl??"https://unconfigured.invalid").TrimEnd('/')+"/");
@@ -34,7 +52,7 @@ HttpClient SupabaseClient()
     if(!string.IsNullOrWhiteSpace(supabaseKey))
     {
         client.DefaultRequestHeaders.Add("apikey",supabaseKey);
-        client.DefaultRequestHeaders.Authorization=new("Bearer",supabaseKey);
+        if(!supabaseKey.StartsWith("sb_secret_",StringComparison.Ordinal))client.DefaultRequestHeaders.Authorization=new("Bearer",supabaseKey);
     }
     return client;
 }
@@ -64,8 +82,17 @@ if(args.Contains("--import-data"))
     Console.WriteLine("Imported official vehicle data, catalogue, employees, occupations and active rules into "+repository.Provider);
     return;
 }
-if(database is PostgresDatabase && !await repository.HasReferenceDataAsync())await repository.SeedAsync(ReferenceData.FromFiles(dataPath));
-var reference=await repository.LoadAsync();
+ReferenceData reference;
+try
+{
+    if(database is PostgresDatabase && !await repository.HasReferenceDataAsync())await repository.SeedAsync(ReferenceData.FromFiles(dataPath));
+    reference=await repository.LoadAsync();
+}
+catch(Exception error)when(database is SupabaseDatabase&&error is not OperationCanceledException)
+{
+    Console.Error.WriteLine("Supabase reference data could not be loaded. Open localhost to check or replace the saved connection.");
+    await InitialSetup.RunAsync(builder,root,connectionManager);return;
+}
 var defaultProfile=new AiProfile{Model=builder.Configuration["Ai:Model"]??"gpt-4.1-mini",BaseUrl=builder.Configuration["Ai:BaseUrl"]??"https://api.openai.com/v1/"};
 var defaultAi=new AiConfiguration(!string.IsNullOrWhiteSpace(builder.Configuration["CARWISE_AI_API_KEY"]??builder.Configuration["Ai:ApiKey"]),defaultProfile,defaultProfile);
 var defaultConfig=new ManagedConfiguration(reference.Rules.DeepClone(),reference.Cars,reference.OccupationDocuments,reference.Employees,defaultAi);
@@ -77,11 +104,6 @@ builder.Services.AddScoped(sp=>sp.GetRequiredService<ConfigurationState>().Curre
 builder.Services.AddScoped(sp=>sp.GetRequiredService<ConfigurationSnapshot>().Data);
 builder.Services.AddScoped<PayrollEngine>();
 builder.Services.AddSingleton(repository);builder.Services.AddSingleton(database);
-var keyDirectory=Environment.GetEnvironmentVariable("CARWISE_KEYRING_DIR")??Path.Combine(root,".local","admin-keys");
-Directory.CreateDirectory(keyDirectory);
-if(!OperatingSystem.IsWindows())File.SetUnixFileMode(keyDirectory,UnixFileMode.UserRead|UnixFileMode.UserWrite|UnixFileMode.UserExecute);
-var protection=builder.Services.AddDataProtection().SetApplicationName("CarWise.Administration").PersistKeysToFileSystem(new DirectoryInfo(keyDirectory));
-if(OperatingSystem.IsWindows())protection.ProtectKeysWithDpapi();
 builder.Services.AddSingleton<SecretVault>();builder.Services.AddSingleton<ConfigurationService>();
 builder.Services.AddHostedService<ConfigurationRefreshWorker>();
 builder.Services.AddSingleton<ExchangeRates>();builder.Services.AddSingleton<UsageReports>();
@@ -98,16 +120,12 @@ builder.Services.AddScoped<IResponseNarrationService>(sp=>{
     return ai.Enabled?new AiNarrationService(new ConfiguredCompletionClient(ai.Narration,sp.GetRequiredService<SecretVault>(),sp.GetRequiredService<IHttpClientFactory>(),accounting:sp.GetRequiredService<UsageAccounting>()),sp.GetRequiredService<ILogger<AiNarrationService>>(),ai.NarrationPrompt):new TemplateNarrationService();
 });
 builder.Services.AddSingleton(new AccessControl(SupabaseClient(),demo));
+builder.Services.AddSingleton(new AuthAccounts(SupabaseClient(),database,state));
 builder.Services.AddScoped<AdvisorService>();
 builder.Services.AddRateLimiter(options=>{
     options.RejectionStatusCode=429;
     options.AddPolicy("documents",context=>RateLimitPartition.GetFixedWindowLimiter(context.Items["caller"] is Caller caller?caller.UserId:context.Connection.RemoteIpAddress?.ToString()??"unknown",_=>new FixedWindowRateLimiterOptions{PermitLimit=5,Window=TimeSpan.FromMinutes(1),QueueLimit=0}));
     options.AddPolicy("login",context=>RateLimitPartition.GetFixedWindowLimiter(context.Connection.RemoteIpAddress?.ToString()??"unknown",_=>new FixedWindowRateLimiterOptions{PermitLimit=8,Window=TimeSpan.FromMinutes(1),QueueLimit=0}));
-});
-builder.Services.Configure<ForwardedHeadersOptions>(options=>{
-    options.ForwardedHeaders=ForwardedHeaders.XForwardedFor|ForwardedHeaders.XForwardedProto;
-    foreach(var address in (Environment.GetEnvironmentVariable("CARWISE_TRUSTED_PROXIES")??"").Split(',',StringSplitOptions.RemoveEmptyEntries|StringSplitOptions.TrimEntries))
-        options.KnownProxies.Add(System.Net.IPAddress.TryParse(address,out var ip)?ip:throw new InvalidOperationException("Invalid trusted proxy IP"));
 });
 var app=builder.Build();
 // Trust only the framework's default loopback proxies unless explicitly configured by the host.
@@ -117,13 +135,15 @@ app.UseRateLimiter();
 app.Use(async(context,next)=>
 {
     context.Response.Headers["X-Content-Type-Options"]="nosniff";
+    context.Response.Headers["X-Frame-Options"]="DENY";
+    context.Response.Headers.ContentSecurityPolicy="frame-ancestors 'none'";
     context.Response.Headers["Referrer-Policy"]="no-referrer";
     if(context.Request.Path.StartsWithSegments("/api"))context.Response.Headers.CacheControl="no-store";
     try
     {
         var path=context.Request.Path.Value??"";
         if(path.StartsWith("/api/",StringComparison.Ordinal))RequestProtection.Validate(context,builder.Environment.IsDevelopment());
-        if(path.StartsWith("/api/") && path is not ("/api/health" or "/api/runtime" or "/api/auth/login"))
+        if(path.StartsWith("/api/") && path is not ("/api/health" or "/api/runtime" or "/api/auth/login" or "/api/setup/admin/status" or "/api/setup/admin"))
             context.Items["caller"]=await app.Services.GetRequiredService<AccessControl>().AuthenticateAsync(context,context.RequestAborted);
         await next(context);
     }
@@ -146,7 +166,7 @@ app.Use(async(context,next)=>
         context.Response.StatusCode=500;await context.Response.WriteAsJsonAsync(new{error="אירעה שגיאת שרת. פרטי התקלה נשמרו בשרת ללא חשיפת נתונים."});
     }
 });
-app.MapGet("/api/runtime",(IDataExtractionService extraction)=>new{server="ASP.NET Core 10",database=repository.Provider,demoMode=demo,aiMode=extraction.Mode,authenticationRequired=!demo,configurationRevision=state.Current.Document.Revision});
+app.MapGet("/api/runtime",(IDataExtractionService extraction)=>new{server="ASP.NET Core 10",database=repository.Provider,demoMode=demo,aiMode=extraction.Mode,authenticationRequired=!demo,configurationRevision=state.Current.Document.Revision,requiresSetup=false,instanceId=ServerInstance.Id});
 app.MapGet("/api/health",async(ReferenceData current,CancellationToken ct)=>
 {
     await repository.HasReferenceDataAsync(ct);
@@ -158,13 +178,13 @@ app.MapPost("/api/auth/login",async(LoginRequest request,AccessControl access,Ca
     return Results.Ok(await access.LoginAsync(request.Email,request.Password,ct));
 }).WithMetadata(new Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute("login"));
 app.MapGet("/api/data",(HttpContext context,ReferenceData reference,AccessControl access)=>new{
-    cars=reference.Cars.Select(reference.Enrich),employees=reference.Employees.Where(e=>demo || context.Items["caller"] is Caller c && e.Id==c.EmployeeId),
-    occupations=reference.OccupationDocuments,rules=reference.Rules,officialCount=reference.Official.Count,canAdmin=access.CanAdmin(context),configurationRevision=state.Current.Document.Revision,payslipEnabled=state.Current.Document.Configuration.Ai.Enabled&&state.Current.Document.Configuration.Ai.PayslipEnabled});
+    cars=reference.Cars.Select(reference.Enrich),employees=reference.Employees.Where(e=>demo || context.Items["caller"] is Caller c && (c.IsAdmin||e.Id==c.EmployeeId)),
+    occupations=reference.OccupationDocuments,rules=reference.Rules,officialCount=reference.Official.Count,canAdmin=access.CanAdmin(context),canAgent=demo||context.Items["caller"] is Caller{IsAgent:true},configurationRevision=state.Current.Document.Revision,payslipEnabled=state.Current.Document.Configuration.Ai.Enabled&&state.Current.Document.Configuration.Ai.PayslipEnabled});
 void AuthorizeEmployee(HttpContext context,AccessControl access,Employee employee)
 {
     access.Employee(context,employee.Id);
     var reference=context.RequestServices.GetRequiredService<ReferenceData>();
-    if(!demo && reference.Employees.SingleOrDefault(e=>e.Id==employee.Id)?.Occupation!=employee.Occupation)
+    if(!demo && context.Items["caller"] is not Caller{IsAdmin:true} && reference.Employees.SingleOrDefault(e=>e.Id==employee.Id)?.Occupation!=employee.Occupation)
         throw new UnauthorizedAccessException("Forbidden");
 }
 app.MapPost("/api/profile",async(SimulateRequest request,HttpContext context,AccessControl access,PayrollEngine engine,CancellationToken ct)=>
@@ -192,7 +212,7 @@ app.MapGet("/api/conversation/{employee}",async(string employee,HttpContext cont
 });
 app.MapPost("/api/chat",async(ChatRequest request,HttpContext context,AccessControl access,AdvisorService advisor,CancellationToken ct)=>
 {
-    AuthorizeEmployee(context,access,request.Employee);context.RequestServices.GetRequiredService<AiOperationContext>().ConversationId=request.Employee.Id;return await advisor.ChatAsync(request,ct);
+    AuthorizeEmployee(context,access,request.Employee);context.RequestServices.GetRequiredService<AiOperationContext>().ConversationId=request.Employee.Id;return await advisor.ChatAsync(request,ct,demo||context.Items["caller"] is Caller{IsAdmin:true});
 });
 app.MapPost("/api/tickets",async(TicketRequest request,HttpContext context,AccessControl access,PayrollEngine engine,ReferenceData reference,CancellationToken ct)=>
 {
@@ -220,6 +240,14 @@ app.MapPost("/api/tickets/{id:guid}",async(Guid id,AnswerRequest request,HttpCon
         $"חישבתי מחדש עבור {r.Car!.Model}: נטו {FinancialText.Number(r.Net)} ₪; הפרש {FinancialText.Signed(r.Delta)} ₪ בחודש.";
     await repository.ResolveAsync(id,request.Participation,request.Answer.Trim(),text,ct);return Results.Ok(new{status="resolved"});
 });
+app.MapGet("/api/setup/admin/status",async(HttpContext context,AuthAccounts accounts,CancellationToken ct)=>{
+    LocalSetupAccess.Require(context);return new{needsAdmin=!demo&&await accounts.NeedsAdminAsync(ct)};
+});
+app.MapPost("/api/setup/admin",async(CreateAccount request,HttpContext context,AuthAccounts accounts,CancellationToken ct)=>{
+    LocalSetupAccess.Require(context);if(demo)throw new ArgumentException("יצירת חשבונות דורשת מצב התחברות עם Supabase");
+    try{return Results.Ok(await accounts.BootstrapAsync(request,ct));}
+    catch(ConfigurationConflictException){return Results.Conflict(new{error="הגדרת מנהל כבר מתבצעת. נסו שוב בעוד מספר דקות."});}
+}).WithMetadata(new Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute("login"));
 app.MapAdministration(repository.Provider,supabaseUrl,demo);
 app.MapPayslips();
 var dist=Path.Combine(root,"dist");

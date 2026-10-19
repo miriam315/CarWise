@@ -157,7 +157,7 @@ public sealed class AdministrationTests
         context.Items["caller"]=new Caller("user","E-001",true);
         Assert.Throws<UnauthorizedAccessException>(()=>access.Admin(context));
         context.Items["caller"]=new Caller("admin","E-001",true,true);access.Admin(context);
-        var demo=new AccessControl(new HttpClient(),true);context.Connection.RemoteIpAddress=IPAddress.Parse("192.0.2.1");
+        var demo=new AccessControl(new HttpClient(),true);context.Request.Host=new HostString("localhost",8000);context.Connection.RemoteIpAddress=IPAddress.Parse("192.0.2.1");
         Assert.Throws<UnauthorizedAccessException>(()=>demo.Admin(context));context.Connection.RemoteIpAddress=IPAddress.Loopback;demo.Admin(context);
     }
     [Fact] public void InvalidTaxAndForgedOfficialValueAreRejected()

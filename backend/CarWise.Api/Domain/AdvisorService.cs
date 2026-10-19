@@ -14,13 +14,14 @@ public sealed class AdvisorService(ReferenceData data,PayrollEngine engine,Repos
         // Client overrides are deliberately ignored; approved participation comes only from persisted agent answers.
         return engine.Simulate(e,approved,pending);
     }
-    public async Task<object> ChatAsync(ChatRequest request,CancellationToken ct)
+    public async Task<object> ChatAsync(ChatRequest request,CancellationToken ct,bool canChangeOccupation=true)
     {
         var e=engine.Validate(request.Employee);var text=request.Text?.Trim()??"";
         if(text.Length is 0 or >2000)throw new ArgumentException("כתבו שאלה עד 2,000 תווים");
         var history=await repository.HistoryAsync(e.Id,ct);
         // Explicit catalogue selection bypasses AI availability. Eligibility still runs exclusively in C#.
         var fields=request.Target is not null?new ExtractedData():await extraction.ExtractAsync(text,e,history,ct);
+        if(!canChangeOccupation&&fields.Occupation is not null&&fields.Occupation!=e.Occupation)throw new UnauthorizedAccessException("Forbidden");
         e=engine.Validate(fields.Apply(e));var simulation=await SimulateAsync(e,ct);
         var lower=text.ToLowerInvariant();var candidates=new List<string>();var target=request.Target;
         if(target is null && fields.VehicleKey is { } key &&

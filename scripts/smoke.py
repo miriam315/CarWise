@@ -11,7 +11,7 @@ def upload_api(path,content):
  with urllib.request.urlopen(urllib.request.Request(BASE+'/api'+path,data=content,headers={'Content-Type':'application/octet-stream'}),timeout=20) as response:return json.load(response)
 def start(state):
  process=subprocess.Popen(['node','scripts/dotnet.mjs','run','--project','backend/CarWise.Api','--no-launch-profile','--no-build'],cwd=ROOT,
-  env={**os.environ,'ASPNETCORE_ENVIRONMENT':'Development','ASPNETCORE_URLS':BASE,'ConnectionStrings__CarWise':state,'SUPABASE_URL':'','CARWISE_SUPABASE_KEY':'','CARWISE_AI_API_KEY':''},
+  env={**os.environ,'ASPNETCORE_ENVIRONMENT':'Development','CarWise__DemoMode':'true','CARWISE_IGNORE_SAVED_CONNECTION':'true','ASPNETCORE_URLS':BASE,'ConnectionStrings__CarWise':state,'SUPABASE_URL':'','CARWISE_SUPABASE_KEY':'','CARWISE_AI_API_KEY':''},
   stdout=(ROOT/'.local/smoke-server.log').open('w'),stderr=subprocess.STDOUT,start_new_session=True)
  for _ in range(600):
   try:request('/health');return process

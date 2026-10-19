@@ -16,16 +16,19 @@ public sealed class AccessControl(HttpClient authClient,bool demoMode)
         using var response=await authClient.SendAsync(request,ct);
         if(!response.IsSuccessStatusCode)throw new UnauthorizedAccessException();
         var user=JsonNode.Parse(await response.Content.ReadAsStringAsync(ct))!;
-        var id=user["id"]?.GetValue<string>();var metadata=user["app_metadata"];
+        return ReadCaller(user);
+    }
+    private static Caller ReadCaller(JsonNode user)
+    {
+        var id=user["id"]?.GetValue<string>();var metadata=user["app_metadata"];var role=metadata?["role"]?.GetValue<string>();
         var employee=metadata?["employee_id"]?.GetValue<string>();
-        // app_metadata is administrator-controlled; user_metadata is deliberately never trusted for authorization.
-        if(string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(employee))throw new UnauthorizedAccessException();
-        var role=metadata?["role"]?.GetValue<string>();
-        return new(id,employee,role is "agent" or "admin",role=="admin");
+        if(string.IsNullOrWhiteSpace(id)||role is not ("employee" or "agent" or "admin")||(role!="admin"&&string.IsNullOrWhiteSpace(employee)))throw new UnauthorizedAccessException();
+        if(DateTimeOffset.TryParse(user["banned_until"]?.GetValue<string>(),out var banned)&&banned>DateTimeOffset.UtcNow)throw new UnauthorizedAccessException();
+        return new(id,employee??"",role is "agent" or "admin",role=="admin");
     }
     public void Employee(HttpContext context,string id)
     {
-        if(demoMode)return;
+        if(demoMode||context.Items["caller"] is Caller{IsAdmin:true})return;
         if(context.Items["caller"] is not Caller caller || caller.EmployeeId!=id)throw new UnauthorizedAccessException("Forbidden");
     }
     public void Agent(HttpContext context)
@@ -33,7 +36,7 @@ public sealed class AccessControl(HttpClient authClient,bool demoMode)
         if(!demoMode && context.Items["caller"] is not Caller{IsAgent:true})throw new UnauthorizedAccessException("Forbidden");
     }
     public bool CanAdmin(HttpContext context) => demoMode
-        ? context.Connection.RemoteIpAddress is { } address && System.Net.IPAddress.IsLoopback(address)
+        ? LocalSetupAccess.Allowed(context)
         : context.Items["caller"] is Caller{IsAdmin:true};
     public void Admin(HttpContext context)
     {if(!CanAdmin(context))throw new UnauthorizedAccessException("Forbidden");}
@@ -43,6 +46,10 @@ public sealed class AccessControl(HttpClient authClient,bool demoMode)
         using var response=await authClient.PostAsJsonAsync("auth/v1/token?grant_type=password",new{email,password},ct);
         if(!response.IsSuccessStatusCode)throw new UnauthorizedAccessException();
         var result=JsonNode.Parse(await response.Content.ReadAsStringAsync(ct))!;
-        return new{accessToken=result["access_token"]!.GetValue<string>(),expiresIn=result["expires_in"]!.GetValue<int>()};
+        var token=result["access_token"]!.GetValue<string>();
+        using var userRequest=new HttpRequestMessage(HttpMethod.Get,"auth/v1/user");userRequest.Headers.Authorization=new AuthenticationHeaderValue("Bearer",token);
+        using var userResponse=await authClient.SendAsync(userRequest,ct);if(!userResponse.IsSuccessStatusCode)throw new UnauthorizedAccessException();
+        var caller=ReadCaller(JsonNode.Parse(await userResponse.Content.ReadAsStringAsync(ct))!);
+        return new{accessToken=token,expiresIn=result["expires_in"]!.GetValue<int>(),role=caller.IsAdmin?"admin":caller.IsAgent?"agent":"employee"};
     }
 }

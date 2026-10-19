@@ -1,0 +1,53 @@
+"""Exercise the real server, encrypted connection file, restart supervisor and login UI.
+Database traffic uses real PostgREST; Supabase Auth uses a controlled GoTrue fixture.
+"""
+from pathlib import Path
+import json,urllib.request,urllib.error,time,shutil
+from playwright.sync_api import sync_playwright,expect
+
+def check(base,query,settings,service_token):
+ def authorized(path,token,body=None):
+  raw=None if body is None else json.dumps(body).encode()
+  with urllib.request.urlopen(urllib.request.Request(base+'/api'+path,data=raw,headers={'Content-Type':'application/json','Authorization':'Bearer '+token}),timeout=20) as r:return json.load(r)
+ def denied(path,token,status,body=None):
+  try:authorized(path,token,body);raise AssertionError('Expected authorization denial')
+  except urllib.error.HTTPError as e:assert e.code==status,(path,e.code)
+ with sync_playwright() as p:
+  executable=shutil.which('chromium');browser=p.chromium.launch(headless=True,args=['--no-sandbox'],**({'executable_path':executable} if executable else {}));page=browser.new_page(viewport={'width':1440,'height':1000});errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
+  page.goto(base);expect(page.get_by_role('heading',name='מחברים פעם אחת. ממשיכים לעבוד.')).to_be_visible()
+  old=query('/runtime')['instanceId'];page.get_by_label('כתובת פרויקט Supabase',exact=True).fill('http://127.0.0.1:55434');page.get_by_label('מפתח שרת Supabase',exact=True).fill(service_token)
+  page.get_by_role('button',name='בדיקת חיבור ושמירה קבועה',exact=True).click()
+  expect(page.get_by_role('heading',name='ניצור את המנהל הראשון.')).to_be_visible(timeout=90000)
+  assert query('/runtime')['instanceId']!=old and query('/runtime')['authenticationRequired']
+  assert settings.exists() and service_token not in settings.read_text()
+  page.get_by_label('דוא״ל להתחברות',exact=True).fill('admin@example.test');page.get_by_label('סיסמה להתחברות',exact=True).fill('TEST-ONLY-ADMIN-PASSWORD-123');page.get_by_label('אימות סיסמת מנהל',exact=True).fill('TEST-ONLY-ADMIN-PASSWORD-123');page.get_by_role('button',name='יצירת מנהל וכניסה',exact=True).click()
+  page.wait_for_selector('.admin-page');admin=page.evaluate("sessionStorage.getItem('carwise-access-token')")
+  page.get_by_role('tab',name='חשבונות והרשאות',exact=True).click();page.get_by_label('דוא״ל לחשבון חדש').fill('employee@example.test');page.get_by_label('סיסמה לחשבון חדש').fill('TEST-ONLY-EMPLOYEE-PASSWORD-123');page.get_by_label('פרופיל לחשבון חדש').select_option('E-001');page.get_by_role('button',name='יצירת חשבון',exact=True).click();expect(page.locator('.admin-success')).to_contain_text('החשבון נוצר')
+  accounts=authorized('/admin/accounts',admin)['items'];worker=next(u for u in accounts if u['email']=='employee@example.test')
+  authorized('/admin/accounts/'+worker['id']+'/password',admin,{'password':'TEST-ONLY-NEW-PASSWORD-123'})
+  page.get_by_role('button',name='יציאה מהחשבון',exact=True).click();expect(page.get_by_role('heading',name='נכנסים לדרך שלך.')).to_be_visible();page.get_by_label('דוא״ל להתחברות',exact=True).fill('employee@example.test');page.get_by_label('סיסמה להתחברות',exact=True).fill('TEST-ONLY-NEW-PASSWORD-123');page.get_by_role('button',name='כניסה למערכת',exact=True).click();page.wait_for_selector('.vehicle-card')
+  employee=page.evaluate("sessionStorage.getItem('carwise-access-token')");own=authorized('/data',employee);assert len(own['employees'])==1 and own['employees'][0]['id']=='E-001' and not own['canAdmin'] and not own['canAgent']
+  expect(page.locator('.sidebar nav').get_by_role('button',name='ניהול המערכת',exact=False)).to_have_count(0);expect(page.locator('.sidebar nav').get_by_role('button',name='מרכז הנציגים',exact=False)).to_have_count(0)
+  denied('/conversation/E-002',employee,403);denied('/admin/configuration',employee,403);denied('/admin/server-connection',employee,403)
+  denied('/data','invalid-user-token',401)
+  screenshots=Path(__file__).resolve().parent.parent/'.local/screenshots';screenshots.mkdir(parents=True,exist_ok=True)
+  page.get_by_role('button',name='יציאה מהחשבון',exact=True).click();page.get_by_role('tab',name='כניסת מנהל',exact=True).click();page.screenshot(path=str(screenshots/'admin-login.png'),full_page=True)
+  page.get_by_label('דוא״ל להתחברות',exact=True).fill('admin@example.test');page.get_by_label('סיסמה להתחברות',exact=True).fill('TEST-ONLY-ADMIN-PASSWORD-123');page.get_by_role('button',name='כניסה למערכת',exact=True).click();page.wait_for_selector('.admin-page');admin=page.evaluate("sessionStorage.getItem('carwise-access-token')")
+  page.get_by_role('tab',name='חיבור Supabase',exact=True).click();expect(page.get_by_label('מפתח שרת Supabase',exact=True)).to_have_value('');expect(page.locator('.admin-connections')).to_contain_text('פעילה')
+  connection=authorized('/admin/server-connection',admin);assert connection['persisted'] and service_token not in json.dumps(connection)
+  old=query('/runtime')['instanceId'];page.get_by_role('button',name='בדיקת חיבור ושמירה קבועה',exact=True).click()
+  for _ in range(600):
+   try:
+    state=query('/runtime')
+    if isinstance(state.get('instanceId'),str) and state['instanceId']!=old and not state.get('requiresSetup'):break
+   except Exception:pass
+   time.sleep(.15)
+  else:raise AssertionError('Server did not restart from its saved connection')
+  page.reload()
+  page.wait_for_selector('.admin-page');assert service_token not in settings.read_text()
+  page.get_by_role('tab',name='חיבור Supabase',exact=True).click();page.screenshot(path=str(screenshots/'saved-connection.png'),full_page=True)
+  denied('/setup/admin',admin,403,{'email':'other@example.test','password':'TEST-ONLY-OTHER-PASSWORD','role':'admin','employeeId':None})
+  assert not query('/setup/admin/status')['needsAdmin']
+  assert not errors,errors
+  browser.close()
+ print('PASS: first-run connection UI, encrypted persistence, automatic server restart, first-admin creation, worker account creation/password reset, employee/admin login, role isolation, hidden keys and repeat-bootstrap denial.')

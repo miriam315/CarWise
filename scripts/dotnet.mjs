@@ -8,6 +8,12 @@ if(executable.startsWith('/workspace/')){
  env.DOTNET_CLI_HOME=env.DOTNET_CLI_HOME||'/workspace/.dotnet-home';env.NUGET_PACKAGES=env.NUGET_PACKAGES||'/workspace/.nuget/packages';
  mkdirSync(env.DOTNET_CLI_HOME,{recursive:true});
 }
-const result=spawnSync(executable,process.argv.slice(2),{cwd:root,env,stdio:'inherit'});
-if(result.error){console.error('Install the .NET 10 SDK, or set CARWISE_DOTNET to the dotnet executable.');process.exit(1)}
+const args=process.argv.slice(2);
+if(args[0]==='run')env.CARWISE_MANAGED_LIFECYCLE='1';
+let result;
+do{
+ result=spawnSync(executable,args,{cwd:root,env,stdio:'inherit'});
+ if(result.error){console.error('Install the .NET 10 SDK, or set CARWISE_DOTNET to the dotnet executable.');process.exit(1)}
+ if(result.status===75&&args[0]==='run')console.log('Restarting CarWise with the saved server settings…');
+}while(result.status===75&&args[0]==='run');
 process.exit(result.status??1);

@@ -24,7 +24,7 @@ try:
  run(['docker','exec','carwise-postgres','psql','-U','carwise','-d',name,'-v','ON_ERROR_STOP=1','-c',"DO $$ BEGIN IF NOT EXISTS(SELECT FROM pg_roles WHERE rolname='service_role') THEN CREATE ROLE service_role NOLOGIN BYPASSRLS; END IF; IF NOT EXISTS(SELECT FROM pg_roles WHERE rolname='anon') THEN CREATE ROLE anon NOLOGIN NOBYPASSRLS; END IF; END $$;"],stdout=subprocess.DEVNULL)
  config=json.loads((ROOT/'.local/appsettings.Development.json').read_text())
  connection=re.sub(r'Database=[^;]+',f'Database={name}',config['ConnectionStrings']['CarWise'])
- env={**os.environ,'ConnectionStrings__CarWise':connection,'ASPNETCORE_ENVIRONMENT':'Development','SUPABASE_URL':'','CARWISE_SUPABASE_KEY':'','CARWISE_AI_API_KEY':''}
+ env={**os.environ,'ConnectionStrings__CarWise':connection,'ASPNETCORE_ENVIRONMENT':'Development','CarWise__DemoMode':'true','CARWISE_IGNORE_SAVED_CONNECTION':'true','SUPABASE_URL':'','CARWISE_SUPABASE_KEY':'','CARWISE_AI_API_KEY':''}
  run(['node','scripts/dotnet.mjs','run','--project','backend/CarWise.Api','--no-launch-profile','--no-build','--','--import-data'],env=env,stdout=subprocess.DEVNULL)
  if subprocess.run(['docker','network','inspect','carwise-dev'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode:run(['docker','network','create','carwise-dev'],stdout=subprocess.DEVNULL)
  networks=json.loads(subprocess.check_output(['docker','inspect','--format','{{json .NetworkSettings.Networks}}','carwise-postgres']))
@@ -49,14 +49,15 @@ try:
   # Supabase's gateway mounts PostgREST under /rest/v1; emulate that prefix locally.
   from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
   from threading import Thread
+  from importlib.machinery import SourceFileLoader
+  auth_fixture=SourceFileLoader('auth_fixture',str(ROOT/'scripts/auth-fixture.py')).load_module().AuthFixture(service_token)
   class Gateway(BaseHTTPRequestHandler):
    def log_message(self,*args):pass
    def do_GET(self):self.forward()
    def do_POST(self):self.forward()
    def do_PATCH(self):self.forward()
+   def do_PUT(self):self.forward()
    def forward(self):
-    if not self.path.startswith('/rest/v1/'):
-     self.send_error(404);return
     size=int(self.headers.get('Content-Length',0));body=self.rfile.read(size) if size else None
     if self.headers.get('Transfer-Encoding','').lower()=='chunked':
      chunks=[]
@@ -65,6 +66,9 @@ try:
       if length==0:self.rfile.readline();break
       chunks.append(self.rfile.read(length));self.rfile.read(2)
      body=b''.join(chunks)
+    if auth_fixture.handle(self,body):return
+    if not self.path.startswith('/rest/v1/'):
+     self.send_error(404);return
     headers={k:v for k,v in self.headers.items() if k.lower() in ('authorization','apikey','content-type','prefer')}
     request=urllib.request.Request('http://127.0.0.1:55433/'+self.path[len('/rest/v1/'):],data=body,headers=headers,method=self.command)
     try:response=urllib.request.urlopen(request)
@@ -96,6 +100,20 @@ try:
    assert query('/conversation/E-001')['status']=='Active'
    assert any('הנציג ענה' in m['text'] for m in query('/history/E-001'))
    print('PASS: real Supabase/PostgREST adapter, 77,988 records, reference data, simulation, transactional agent RPC, conversation resume, anonymous RLS denial.')
+   os.killpg(process.pid,signal.SIGTERM);process.wait(timeout=10)
+   settings=Path(temp)/'server-settings'/'connection.json'
+   env.update({'SUPABASE_URL':'','CARWISE_SUPABASE_KEY':'','ConnectionStrings__CarWise':'','CarWise__DemoMode':'false','CARWISE_IGNORE_SAVED_CONNECTION':'false','CARWISE_SERVER_SETTINGS_PATH':str(settings)})
+   process=subprocess.Popen(['node','scripts/dotnet.mjs','run','--project','backend/CarWise.Api','--no-launch-profile','--no-build'],cwd=ROOT,env=env,stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
+   for _ in range(600):
+    try:
+     if query('/runtime').get('requiresSetup'):break
+    except Exception:pass
+    time.sleep(.1)
+   else:raise RuntimeError('First-run setup server did not start')
+   SourceFileLoader('auth_connection_checks',str(ROOT/'scripts/auth-connection-checks.py')).load_module().check(base,query,settings,service_token)
+   assert 'SUPABASE_URL' in env and not env['SUPABASE_URL'] and not env['CARWISE_SUPABASE_KEY']
+   assert service_token not in (ROOT/'.local/rest-smoke-server.log').read_text()
+
 finally:
  if proxy:proxy.shutdown()
  if process and process.poll() is None:os.killpg(process.pid,signal.SIGTERM);process.wait(timeout=10)

@@ -3,6 +3,6 @@ export type Employee={id:string;name:string;occupation:string;group:string;salar
 export type Occupation={occupation:string;group:string;mandatory:boolean;waiver:boolean;maintenance:number};
 export type Result={id:string;car:Car|null;eligible:boolean;pending?:boolean;reason:string;net:number;delta:number;annual:number;tax:number;insurance:number;taxable:number;gross:number;pension:number;fund:number;value:number;participation:number;familyGap:number;maintenance:number;electricGross:number;electricNet:number;budget:number;cost:number};
 export type Simulation={employee:Employee;current:Result;results:Result[]};
-export type Data={employees:Employee[];cars:Car[];occupations:Occupation[];rules:any;officialCount:number;canAdmin?:boolean;payslipEnabled?:boolean;configurationRevision?:number};
+export type Data={employees:Employee[];cars:Car[];occupations:Occupation[];rules:any;officialCount:number;canAdmin?:boolean;canAgent?:boolean;payslipEnabled?:boolean;configurationRevision?:number};
 export type Ticket={id:string;employee:string;target:string;question:string;status:string;answer:string|null;participation:number|null;created:string};
 export type Message={role:string;text:string;candidates?:string[]};

@@ -14,6 +14,15 @@ public static class AdminEndpoints
             try{return await next(context);}
             catch(ConfigurationConflictException){return Results.Conflict(new{error="ההגדרות השתנו על ידי מנהל אחר. טענו את הגרסה העדכנית לפני שמירה."});}
         });
+        group.MapGet("/server-connection",(ServerConnectionManager manager,CancellationToken ct)=>manager.ViewAsync(ct));
+        group.MapPost("/server-connection",async(SaveServerConnection request,ServerConnectionManager manager,HttpContext context,CancellationToken ct)=>{
+            await manager.SaveAsync(request,Actor(context),ct);return LocalSetupAccess.RestartResult(context,app);
+        }).WithMetadata(new Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute("login"));
+        group.MapGet("/accounts",async(AuthAccounts accounts,CancellationToken ct)=>new{items=await accounts.ListAsync(ct)});
+        group.MapPost("/accounts",(CreateAccount request,AuthAccounts accounts,CancellationToken ct)=>accounts.CreateAsync(request,ct))
+            .WithMetadata(new Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute("login"));
+        group.MapPost("/accounts/{id}/password",async(string id,ResetAccountPassword request,AuthAccounts accounts,CancellationToken ct)=>{await accounts.ResetAsync(id,request.Password,ct);return new{saved=true};})
+            .WithMetadata(new Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute("login"));
         group.MapGet("/configuration",(ConfigurationService settings,CancellationToken ct)=>settings.ViewAsync(ct));
         group.MapPost("/configuration",async(SaveConfigurationRequest request,ConfigurationService settings,HttpContext context,CancellationToken ct)=>{
             await settings.SaveAsync(request,Actor(context),ct);return await settings.ViewAsync(ct);
@@ -25,7 +34,7 @@ public static class AdminEndpoints
             var databaseReady=await repository.HasReferenceDataAsync(ct);
             return new{database=provider,databaseReady,supabaseHost=Uri.TryCreate(supabaseUrl,UriKind.Absolute,out var uri)?uri.Host:null,
                 server="ASP.NET Core 10",demoMode=demo,keyStorage="ASP.NET Data Protection",revision=settings.State.Current.Document.Revision,
-                note="כתובת המסד, מפתח השירות והרשאות הרשת מוגדרים בתשתית האירוח; מפתחות AI וההגדרות העסקיות ניתנים לניהול כאן."};
+                note="כתובת Supabase ומפתח השרת נשמרים דרך הניהול; הרשאות הרשת מוגדרות בתשתית האירוח."};
         });
         group.MapPost("/test-ai",async(TestAiRequest request,SecretVault vault,IHttpClientFactory clients,UsageAccounting accounting,CancellationToken ct)=>{
             ConfigurationValidator.ValidateAi(request.Profile);
