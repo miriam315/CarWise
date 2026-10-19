@@ -7,9 +7,12 @@
     "dev": "vite --host 0.0.0.0",
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 0.0.0.0",
-    "server": "python3 server/app.py",
-    "test": "python3 -m unittest discover -s server -p 'test_*.py' -v",
-    "start": "python3 server/app.py"
+    "server": "node scripts/dotnet.mjs run --project backend/CarWise.Api --no-launch-profile",
+    "test": "node scripts/dotnet.mjs test backend/CarWise.Tests --nologo",
+    "start": "npm run server",
+    "server:build": "node scripts/dotnet.mjs build backend/CarWise.Api --nologo",
+    "db:start": "node scripts/dev-db.mjs",
+    "db:import": "node scripts/dotnet.mjs run --project backend/CarWise.Api --no-launch-profile -- --import-data"
   },
   "dependencies": {
     "@fontsource/heebo": "^5.3.0",

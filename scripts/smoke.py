@@ -1,6 +1,6 @@
 """Isolated end-to-end smoke test. Requires playwright and Chromium."""
 from pathlib import Path
-import os, sys, subprocess, tempfile, time, json, urllib.request, shutil
+import os, sys, subprocess, tempfile, time, json, urllib.request, shutil, re, uuid, signal
 from playwright.sync_api import sync_playwright, expect
 ROOT=Path(__file__).resolve().parent.parent
 BASE='http://127.0.0.1:8001'
@@ -8,17 +8,39 @@ def request(path,body=None):
  data=None if body is None else json.dumps(body).encode()
  with urllib.request.urlopen(urllib.request.Request(BASE+'/api'+path,data=data,headers={'Content-Type':'application/json'})) as r:return json.load(r)
 def start(state):
- process=subprocess.Popen([sys.executable,'server/app.py'],cwd=ROOT,env={**os.environ,'CARWISE_PORT':'8001','CARWISE_STATE_DIR':str(state)},stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
- for _ in range(50):
+ process=subprocess.Popen(['node','scripts/dotnet.mjs','run','--project','backend/CarWise.Api','--no-launch-profile','--no-build'],cwd=ROOT,
+  env={**os.environ,'ASPNETCORE_ENVIRONMENT':'Development','ASPNETCORE_URLS':BASE,'ConnectionStrings__CarWise':state},
+  stdout=(ROOT/'.local/smoke-server.log').open('w'),stderr=subprocess.STDOUT,start_new_session=True)
+ for _ in range(600):
   try:request('/health');return process
-  except Exception:time.sleep(.1)
- process.terminate();raise RuntimeError('Test server did not start')
-def stop(process):process.terminate();process.wait(timeout=5)
+  except Exception:
+   if process.poll() is not None: raise RuntimeError('ASP.NET Core test server exited')
+   time.sleep(.1)
+ stop(process);raise RuntimeError('Test server did not start')
+def stop(process):
+ if process.poll() is None:
+  os.killpg(process.pid,signal.SIGTERM);process.wait(timeout=10)
+ # dotnet run has a child process; wait for its listener to close before restarting.
+ for _ in range(100):
+  try:request('/health')
+  except Exception:return
+  time.sleep(.05)
+ raise RuntimeError('Previous ASP.NET Core listener did not stop')
 with tempfile.TemporaryDirectory(prefix='carwise-smoke-') as temp:
- process=start(temp)
+ dbname='carwise_smoke_'+uuid.uuid4().hex[:12]
+ subprocess.run(['docker','exec','carwise-postgres','createdb','-U','carwise',dbname],check=True)
+ config=json.loads((ROOT/'.local/appsettings.Development.json').read_text())
+ connection=re.sub(r'Database=[^;]+',f'Database={dbname}',config['ConnectionStrings']['CarWise'])
+ process=start(connection)
  try:
   data=request('/data');assert data['officialCount']==77988
   employee=data['employees'][0]
+  runtime=request('/runtime');assert runtime['server']=='ASP.NET Core 10' and runtime['database']=='PostgreSQL'
+  sim=request('/simulate',{'employee':employee,'overrides':{'CAR-10':0}})
+  assert next(r for r in sim['results'] if r['id']=='CAR-10')['participation']==300 # Client cannot forge approval.
+  from concurrent.futures import ThreadPoolExecutor
+  # The browser below will also submit; PostgreSQL serializes duplicate requests.
+
   extracted=request('/chat',{'employee':{**employee,'id':'E-SMOKE-EXTRACTION'},'text':'שכר בסיס 19500, השווה ATTO 3'})
   assert extracted['employee']['salary']==19500 and extracted['target']=='CAR-10'
   assert 'עדכנתי' in extracted['reply']
@@ -52,8 +74,13 @@ with tempfile.TemporaryDirectory(prefix='carwise-smoke-') as temp:
    page.get_by_role('button',name='לא בטוחים בהשתתפות? שואלים נציג').click()
    page.wait_for_selector('.toast')
    ticket_id=request('/tickets')[0]['id']
-   assert request('/tickets',{'employee':employee,'target':'CAR-10'})['id']==ticket_id
+   assert request('/tickets',{'employee':employee,'target':'CAR-10','question':'מהי ההשתתפות המאושרת?'})['id']==ticket_id
    assert len(request('/tickets'))==1
+   assert request('/conversation/E-001')['status']=='PendingAgentResponse'
+   with ThreadPoolExecutor(max_workers=4) as pool:
+    ids=list(pool.map(lambda _:request('/tickets',{'employee':employee,'target':'CAR-10','question':'מהי ההשתתפות המאושרת?'})['id'],range(4)))
+   assert len(set(ids))==1 and ids[0]==ticket_id
+   assert 'ממתינה' in request('/chat',{'employee':employee,'text':'השווה ATTO 3','target':'CAR-10'})['reply']
    nav('הסקירה שלי');expect(page.locator('.insight-banner')).to_contain_text('מחכים לתשובת הנציג')
    page.reload();page.wait_for_selector('.insight-banner');expect(page.locator('.insight-banner')).to_contain_text('מחכים לתשובת הנציג')
    nav('מרכז הנציגים');expect(page.locator('.ticket-card')).to_have_count(1)
@@ -61,6 +88,9 @@ with tempfile.TemporaryDirectory(prefix='carwise-smoke-') as temp:
    page.get_by_label('תשובת הנציג').fill('אושר: 350 ₪ לחודש, בתוקף מיידי.')
    page.get_by_role('button',name='שליחת תשובה והמשך השיחה').click()
    expect(page.locator('.resolved-answer')).to_contain_text('350')
+   assert request('/conversation/E-001')['status']=='Active'
+   resolved=request('/simulate',{'employee':employee,'overrides':{'CAR-10':0}})
+   assert next(r for r in resolved['results'] if r['id']=='CAR-10')['participation']==350
    nav('היועץ החכם');expect(page.locator('.chat-messages')).to_contain_text('הנציג ענה')
    page.get_by_label('הודעה ליועץ').fill('מה יקרה אם אוותר על הרכב?')
    page.get_by_role('button',name='שליחת הודעה').click()
@@ -83,8 +113,10 @@ with tempfile.TemporaryDirectory(prefix='carwise-smoke-') as temp:
    assert not errors,errors
    browser.close()
   # Restart the API and confirm answer, participation and resumed conversation survived.
-  stop(process);process=start(temp)
+  stop(process);process=start(connection)
   t=request('/tickets');assert len(t)==1 and t[0]['status']=='resolved' and t[0]['participation']==350
   assert any('הנציג ענה' in m['text'] for m in request('/history/E-001'))
   print('PASS: salary edits, catalogue filtering, official keys, pending/resolved handoff, conversation resume, six employee profiles, waiver denial, desktop/mobile overflow, persisted restart; no browser errors.')
- finally:stop(process)
+ finally:
+  stop(process)
+  subprocess.run(['docker','exec','carwise-postgres','dropdb','-U','carwise','--force',dbname],check=True)

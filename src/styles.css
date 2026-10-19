@@ -14,3 +14,5 @@
 @media(max-width:980px){.hero-photo{top:96px;left:-7%;width:114%;height:197px}.float-saving{bottom:23px}}
 @media(max-width:750px){.hero-photo{top:91px;height:205px}.float-saving{bottom:24px}}
 @media(max-width:520px){.hero-photo{top:-8px;left:-15%;width:128%;height:190px}.float-saving{bottom:9px}.hero{min-height:435px}.hero-visual{bottom:0;height:192px}}
+
+.login-form{width:min(400px,90vw);padding:30px;display:flex;flex-direction:column;gap:20px}.login-form h1{font-size:24px;color:#554365}.login-form p{font-size:11px;line-height:1.8}.login-form label{font-size:11px;display:flex;flex-direction:column;gap:7px}.login-form input{border:1px solid #ded4eb;border-radius:7px;padding:12px;background:#fcfaff;direction:ltr}.login-form button{width:100%}
