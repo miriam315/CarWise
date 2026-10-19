@@ -7,31 +7,38 @@ namespace CarWise.Api.AI;
 
 public sealed class AiProviderException(int status,string code) : AiUnavailableException(
     code is "credit_balance_exhausted" or "insufficient_quota"?"אין יתרת API זמינה בחשבון הספק. בדקו חיוב או מפתח מחשבון בעל מכסה זמינה.":
-    status is 401 or 403?"הספק דחה את המפתח או את הרשאותיו.":$"שירות הספק החזיר שגיאה ({status}).")
+    status is 401 or 403?"הספק דחה את המפתח או את הרשאותיו.":
+    status==429?"הספק הגביל את קצב הקריאות או את המכסה. בדקו את מגבלות החשבון או נסו מפתח בעל מכסה נפרדת.":
+    status==404?"המודל או נתיב ה־API לא נמצאו אצל הספק. בדקו את שם המודל, הכתובת והרשאת החשבון למודל.":
+    status is 400 or 422?"הספק דחה את מבנה הבקשה. בדקו התאמה של המודל לפורמט API ול־JSON Schema; טווח טוקנים תקין במערכת אינו מבטיח שהמודל תומך בכל הפרמטרים.":
+    status is 503 or 529?"שירות הספק עמוס או לא זמין כרגע. נסו שוב מאוחר יותר.":$"שירות הספק החזיר שגיאה ({status}).",code)
 {
     public int Status=>status;
-    public string Code=>code;
     public double? RetryAfterSeconds {get;init;}
     public JsonNode? UsageBody {get;init;}
+    public string? Parameter {get;init;}
     public bool CanFailOver=>Status is 401 or 402 or 403 or 429 or 503 or 529;
     public static async Task<AiProviderException> FromResponseAsync(HttpResponseMessage response,CancellationToken ct)
     {
-        var code="provider_error";JsonNode? usage=null;
+        var code="provider_error";string? parameter=null;JsonNode? usage=null;
         try
         {
             var body=JsonNode.Parse(await response.Content.ReadAsStringAsync(ct));
             usage=new JsonObject{["usage"]=body?["usage"]?.DeepClone(),["usageMetadata"]=body?["usageMetadata"]?.DeepClone()};
             var value=body?["error"]?["code"]?.ToString()??body?["error"]?["type"]?.ToString()??body?["error"]?["status"]?.ToString()??"provider_error";
             if(Regex.IsMatch(value,@"^[A-Za-z0-9_-]{1,80}$"))code=value;
+            var param=body?["error"]?["param"]?.ToString();
+            if(param is "model" or "max_tokens" or "max_completion_tokens" or "response_format" or "response_format.json_schema"
+                or "generationConfig.maxOutputTokens" or "generationConfig.responseJsonSchema" or "output_config")parameter=param;
         }
         catch(Exception error)when(error is System.Text.Json.JsonException or InvalidOperationException){ }
         var retry=response.Headers.RetryAfter;
         var seconds=retry?.Delta?.TotalSeconds??(retry?.Date-DateTimeOffset.UtcNow)?.TotalSeconds;
-        return new((int)response.StatusCode,code){RetryAfterSeconds=seconds,UsageBody=usage};
+        return new((int)response.StatusCode,code){RetryAfterSeconds=seconds,UsageBody=usage,Parameter=parameter};
     }
 }
 /// <summary>Native adapters share a provider-independent structured-completion contract.</summary>
-public sealed class ConfiguredCompletionClient(AiProfile profile,SecretVault vault,IHttpClientFactory clients,string? testKey=null,UsageAccounting? accounting=null,AiKeyHealth? health=null,AiBackupKey? keyToTest=null) : IAiCompletionClient
+public sealed class ConfiguredCompletionClient(AiProfile profile,SecretVault vault,IHttpClientFactory clients,string? testKey=null,UsageAccounting? accounting=null,AiKeyHealth? health=null,AiBackupKey? keyToTest=null,IReadOnlyDictionary<string,string>? draftKeys=null) : IAiCompletionClient
 {
     public Task<string> CompleteAsync(string name,JsonNode schema,string instructions,string text,CancellationToken ct)=>ExecuteAsync(name,schema,instructions,text,null,ct);
     public Task<string> CompleteDocumentAsync(string name,JsonNode schema,string instructions,AiDocument document,CancellationToken ct)=>ExecuteAsync(name,schema,instructions,"Extract the explicitly printed payroll fields from the attached document.",document,ct);
@@ -47,9 +54,11 @@ public sealed class ConfiguredCompletionClient(AiProfile profile,SecretVault vau
         foreach(var slot in candidates)
         {
             deadline.Token.ThrowIfCancellationRequested();
-            if(testKey is null&&breaker.Get(profile,slot.KeyReference) is not null)continue;
+            var draftKey=draftKeys?.GetValueOrDefault(slot.Id);
+            var temporary=testKey is not null||!string.IsNullOrWhiteSpace(draftKey);
+            if(!temporary&&breaker.Get(profile,slot.KeyReference) is not null)continue;
             string? key;
-            try{key=testKey??await vault.ResolveAsync(slot.KeyReference,deadline.Token,new Uri(profile.BaseUrl).Host);}
+            try{key=testKey??(!string.IsNullOrWhiteSpace(draftKey)?draftKey.Trim():await vault.ResolveAsync(slot.KeyReference,deadline.Token,new Uri(profile.BaseUrl).Host));}
             catch(ArgumentException){continue;} // Unreadable/replaced vault entries must not block a valid backup.
             if(string.IsNullOrWhiteSpace(key)||!seen.Add(key))continue;
             attempt++;
@@ -58,18 +67,18 @@ public sealed class ConfiguredCompletionClient(AiProfile profile,SecretVault vau
             try
             {
                 var result=await SendAsync(name,schema,instructions,text,body=>usageBody=body,document,key,deadline.Token);
-                if(testKey is null)breaker.Success(profile,slot.KeyReference);return result;
+                if(!temporary)breaker.Success(profile,slot.KeyReference);return result;
             }
             catch(AiProviderException error)when(error.CanFailOver)
             {
                 failure=last=error;usageBody=error.UsageBody;
-                if(testKey is null)breaker.Reject(profile,slot.KeyReference,error);
+                if(!temporary)breaker.Reject(profile,slot.KeyReference,error);
             }
             catch(Exception error){failure=error;if(error is AiProviderException provider)usageBody=provider.UsageBody;throw;}
             finally{if(record is not null)await accounting!.FinishAsync(record,usageBody,failure);}
         }
         if(last is not null)throw last;
-        throw new AiUnavailableException("אין מפתח AI זמין כרגע. המפתחות חסרים, מושבתים או בהמתנה לאחר תקלה. אפשר לנסות מאוחר יותר או לבדוק בניהול.");
+        throw new AiUnavailableException("אין מפתח AI זמין כרגע. המפתחות חסרים, מושבתים או בהמתנה לאחר תקלה. אפשר לנסות מאוחר יותר או לבדוק מפתח מסוים בנפרד בניהול.","key_unavailable");
     }
     private async Task<string> SendAsync(string name,JsonNode schema,string instructions,string text,Action<JsonNode?> observe,AiDocument? document,string key,CancellationToken ct)
     {
@@ -103,12 +112,14 @@ public sealed class ConfiguredCompletionClient(AiProfile profile,SecretVault vau
             string? output;
             if(profile.Provider=="anthropic")
             {
+                if(body?["stop_reason"]?.GetValue<string>()=="max_tokens")throw new AiUnavailableException("הפלט נקטע בגלל מגבלת הטוקנים. הגדילו את מגבלת הפלט ונסו שוב.","output_limit");
                 if(body?["stop_reason"]?.GetValue<string>()!="end_turn")throw new AiUnavailableException("הספק לא השלים תשובה מובנית");
                 output=string.Concat(body?["content"]?.AsArray().Where(p=>p?["type"]?.GetValue<string>()=="text").Select(p=>p!["text"]!.GetValue<string>())??[]);
             }
             else
             {
                 var candidate=body?["candidates"]?[0];
+                if(candidate?["finishReason"]?.GetValue<string>()=="MAX_TOKENS")throw new AiUnavailableException("הפלט נקטע בגלל מגבלת הטוקנים. הגדילו את מגבלת הפלט ונסו שוב. במודלי חשיבה גם טוקנים פנימיים עשויים להיכלל במגבלה.","output_limit");
                 if(candidate?["finishReason"]?.GetValue<string>()!="STOP")throw new AiUnavailableException("הספק חסם או לא השלים את התשובה");
                 output=string.Concat(candidate?["content"]?["parts"]?.AsArray().Select(p=>p?["text"]?.GetValue<string>()??"")??[]);
             }

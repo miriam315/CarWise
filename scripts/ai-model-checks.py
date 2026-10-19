@@ -17,6 +17,52 @@ def check(page,query,nav,screenshots):
  page.get_by_role('button',name='הוספת מפתח גיבוי',exact=True).click()
  page.get_by_label('מפתח גיבוי 2',exact=True).fill('TEST-ONLY-PDF-BACKUP-B')
  page.get_by_label('הפעלת גיבוי 2',exact=True).uncheck()
+ # Connection testing must use unsaved keys and the exact values visible in the editor.
+ probes=[]
+ def probe(route):
+  probes.append(route.request.post_data_json)
+  route.fulfill(status=200,content_type='application/json',body=json.dumps({'success':True,'code':'ok','message':'בדיקת טיוטה תקינה'}))
+ page.route('**/api/admin/test-ai',probe)
+ page.get_by_label('מגבלת טוקנים לפלט',exact=True).fill('8192')
+ page.get_by_label('זמן המתנה כולל (שניות)',exact=True).fill('60')
+ page.get_by_role('button',name='בדיקת חיבור עם גיבוי',exact=True).click()
+ expect(page.locator('.admin-test')).to_contain_text('בדיקת טיוטה תקינה')
+ assert probes[-1]['profile']['maxOutputTokens']==8192 and probes[-1]['profile']['timeoutSeconds']==60
+ assert probes[-1]['apiKeys']['primary']=='TEST-ONLY-PDF-PRIMARY'
+ assert len(probes[-1]['apiKeys'])==3 and 'apiKey' not in probes[-1]
+ page.get_by_label('זמן המתנה כולל (שניות)',exact=True).fill('91')
+ expect(page.locator('.admin-test')).to_have_count(0)
+ page.get_by_role('button',name='בדיקת מפתח ראשי',exact=True).click()
+ expect(page.locator('.admin-test')).to_contain_text('91')
+ assert len(probes)==1 # Invalid limits are caught before a provider request.
+ page.get_by_label('זמן המתנה כולל (שניות)',exact=True).fill('90')
+ page.get_by_label('מגבלת טוקנים לפלט',exact=True).fill('128')
+ page.get_by_role('button',name='בדיקת מפתח ראשי',exact=True).click()
+ expect(page.locator('.admin-test')).to_contain_text('בדיקת טיוטה תקינה')
+ assert probes[-1]['apiKey']=='TEST-ONLY-PDF-PRIMARY' and 'apiKeys' not in probes[-1]
+ assert probes[-1]['profile']['maxOutputTokens']==128 and probes[-1]['profile']['timeoutSeconds']==90
+ # A hidden invalid model must be named when saving another model with valid values.
+ page.get_by_label('מגבלת טוקנים לפלט',exact=True).fill('127')
+ page.locator('.ai-model-list button').first.click()
+ page.get_by_role('button',name='שמירה והפעלה',exact=True).click()
+ expect(page.locator('.admin-page .error-banner')).to_contain_text('PDF browser test')
+ expect(page.locator('.admin-page .error-banner')).to_contain_text('127')
+ page.locator('.ai-model-list button').filter(has_text='PDF browser test').click()
+ page.get_by_label('מגבלת טוקנים לפלט',exact=True).fill('1200')
+ page.get_by_label('זמן המתנה כולל (שניות)',exact=True).fill('35')
+ # A late response for an edited profile must never appear as a result for the new settings.
+ page.unroute('**/api/admin/test-ai',probe)
+ held=[]
+ page.route('**/api/admin/test-ai',lambda route:held.append(route))
+ page.get_by_role('button',name='בדיקת חיבור עם גיבוי',exact=True).click()
+ expect(page.get_by_role('button',name='בודקים…',exact=True)).to_be_visible()
+ page.get_by_label('מגבלת טוקנים לפלט',exact=True).fill('1400')
+ assert held
+ held[0].fulfill(status=200,content_type='application/json',body=json.dumps({'success':False,'code':'old_failure','message':'obsolete test result'}))
+ expect(page.get_by_role('button',name='בדיקת חיבור עם גיבוי',exact=True)).to_be_enabled()
+ expect(page.locator('.admin-test')).to_have_count(0)
+ page.unroute('**/api/admin/test-ai')
+ page.get_by_label('מגבלת טוקנים לפלט',exact=True).fill('1200')
  pdf_id=page.get_by_label('מודל לשירות payslip',exact=True).locator('option').filter(has_text='PDF browser test').get_attribute('value')
  page.get_by_label('מודל לשירות payslip',exact=True).select_option(pdf_id)
  expect(page.get_by_role('button',name='הסרת מודל',exact=True)).to_be_disabled()
@@ -69,7 +115,7 @@ def check(page,query,nav,screenshots):
  page.get_by_role('button',name='בדיקת זמינות מחדש',exact=True).click();expect(page.get_by_label('העלאת תלוש שכר')).to_have_count(1)
  restored=query('/admin/restore',{'expectedRevision':saved['revision'],'revision':baseline_revision,'note':'restore original models after isolated browser check'})
  page.reload();page.wait_for_selector('.vehicle-card');nav('ניהול המערכת')
- print('PASS: model catalogue UI, independent PDF binding, shared conversation binding, encrypted primary/backup keys, disabled keys, persistence and mobile layout; no paid calls.')
+ print('PASS: draft connection probes, valid boundary values, hidden invalid model context, stale-result prevention; model catalogue UI, independent PDF binding, shared conversation binding, encrypted primary/backup keys, disabled keys, persistence and mobile layout; no paid calls.')
  return restored['revision']
 
 def check_api(query):

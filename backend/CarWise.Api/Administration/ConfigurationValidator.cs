@@ -87,7 +87,9 @@ public sealed class ConfigurationValidator(ReferenceData officialSource)
                 if(config.Ai.ServiceModels!.Count!=3||new[]{"extraction","narration","payslip"}.Any(service=>!config.Ai.ServiceModels.TryGetValue(service,out var id)||!config.Ai.Models.Any(m=>m.Id==id)))Fail("יש לבחור מודל קיים לכל שירות AI");
                 if(config.Ai.PayslipEnabled&&!config.Ai.ProfileFor("payslip").SupportsDocuments)Fail("לחילוץ תלושים יש לבחור מודל המסומן כתומך PDF ותמונות");
             }
-            foreach(var model in config.Ai.RegisteredModels())ValidateAi(model.Profile);
+            foreach(var model in config.Ai.RegisteredModels())
+                try{ValidateAi(model.Profile);}
+                catch(ArgumentException error){throw new ArgumentException($"מודל ״{model.Name}״ ({model.Id}): {error.Message}");}
             if(config.Ai.Pricing is null || config.Ai.Pricing.Count>200 || config.Ai.ExchangeRateUpdateHourUtc is <0 or >23)Fail("הגדרות תמחור או שעת עדכון אינן תקינות");
             var priceKeys=new HashSet<string>();
             foreach(var price in config.Ai.Pricing!)
@@ -108,8 +110,8 @@ public sealed class ConfigurationValidator(ReferenceData officialSource)
         if(profile.DisplayName is null||profile.DisplayName.Length>100)Fail("שם ספק ארוך מדי");
         if(profile.Provider is not ("openai" or "compatible" or "anthropic" or "gemini"))Fail("ספק AI לא נתמך");
         if(string.IsNullOrWhiteSpace(profile.Model)||profile.Model.Length>160||!Regex.IsMatch(profile.Model,@"^[A-Za-z0-9_./:@-]+$"))Fail("שם מודל לא תקין");
-        if(profile.MaxOutputTokens is <128 or >8192)Fail("מגבלת הפלט חייבת להיות בין 128 ל־8,192 טוקנים");
-        if(profile.TimeoutSeconds is <5 or >90)Fail("זמן ההמתנה חייב להיות בין 5 ל־90 שניות");
+        if(profile.MaxOutputTokens is <128 or >8192)Fail($"מגבלת הפלט היא {profile.MaxOutputTokens}; יש להזין בין 128 ל־8,192 טוקנים");
+        if(profile.TimeoutSeconds is <5 or >90)Fail($"זמן ההמתנה הוא {profile.TimeoutSeconds}; יש להזין בין 5 ל־90 שניות");
         if(!Uri.TryCreate(profile.BaseUrl,UriKind.Absolute,out var uri)||uri.Scheme!="https"||!uri.IsDefaultPort||!string.IsNullOrEmpty(uri.UserInfo)||!string.IsNullOrEmpty(uri.Query)||!string.IsNullOrEmpty(uri.Fragment))Fail("כתובת AI חייבת להיות HTTPS ללא פרטי גישה, פורט או פרמטרים");
         var allowed=new Dictionary<string,string[]>{["openai"]=["api.openai.com"],["anthropic"]=["api.anthropic.com"],["gemini"]=["generativelanguage.googleapis.com"],
             ["compatible"]=["api.openai.com","api.groq.com","api.mistral.ai","openrouter.ai","api.deepseek.com","api.together.xyz","api.fireworks.ai"]};

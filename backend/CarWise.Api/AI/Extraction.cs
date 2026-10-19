@@ -83,7 +83,8 @@ public sealed class AiExtractionService(IAiCompletionClient gateway,string manag
         return extracted;
     }
 }
-public class AiUnavailableException(string message) : Exception(message);
+public class AiUnavailableException(string message,string code="unavailable") : Exception(message)
+{public string Code {get;}=code;}
 public interface IAiCompletionClient
 {
     Task<string> CompleteAsync(string name,JsonNode schema,string instructions,string text,CancellationToken ct);
@@ -101,8 +102,10 @@ public sealed class AiGateway(HttpClient client,string model,int maxOutputTokens
         var result=JsonNode.Parse(await response.Content.ReadAsStringAsync(ct));
         observe?.Invoke(result);
         var choice=result?["choices"]?[0];
+        if(choice?["finish_reason"]?.GetValue<string>()=="length")
+            throw new AiUnavailableException("הפלט נקטע בגלל מגבלת הטוקנים. הגדילו את מגבלת הפלט בהגדרות המודל ונסו שוב. במודלי חשיבה גם טוקנים פנימיים עשויים להיכלל במגבלה.","output_limit");
         if(choice?["finish_reason"]?.GetValue<string>()!="stop" || choice?["message"]?["refusal"] is not null)
-            throw new AiUnavailableException("המודל לא החזיר תשובה מובנית מלאה. אפשר לבחור חלופה מהקטלוג.");
-        return choice?["message"]?["content"]?.GetValue<string>()??throw new AiUnavailableException("לא התקבלה תשובה משירות ה־AI");
+            throw new AiUnavailableException("המודל סירב או לא השלים תשובה מובנית.","incomplete_output");
+        return choice?["message"]?["content"]?.GetValue<string>()??throw new AiUnavailableException("לא התקבלה תשובה משירות ה־AI","empty_output");
     }
 }
