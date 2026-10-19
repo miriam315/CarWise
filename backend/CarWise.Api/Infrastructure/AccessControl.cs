@@ -2,7 +2,7 @@ using System.Net.Http.Headers;
 using System.Text.Json.Nodes;
 namespace CarWise.Api.Infrastructure;
 
-public sealed record Caller(string UserId,string EmployeeId,bool IsAgent);
+public sealed record Caller(string UserId,string EmployeeId,bool IsAgent,bool IsAdmin=false);
 public sealed class AccessControl(HttpClient authClient,bool demoMode)
 {
     public bool DemoMode=>demoMode;
@@ -20,7 +20,8 @@ public sealed class AccessControl(HttpClient authClient,bool demoMode)
         var employee=metadata?["employee_id"]?.GetValue<string>();
         // app_metadata is administrator-controlled; user_metadata is deliberately never trusted for authorization.
         if(string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(employee))throw new UnauthorizedAccessException();
-        return new(id,employee,metadata?["role"]?.GetValue<string>()=="agent");
+        var role=metadata?["role"]?.GetValue<string>();
+        return new(id,employee,role is "agent" or "admin",role=="admin");
     }
     public void Employee(HttpContext context,string id)
     {
@@ -31,6 +32,11 @@ public sealed class AccessControl(HttpClient authClient,bool demoMode)
     {
         if(!demoMode && context.Items["caller"] is not Caller{IsAgent:true})throw new UnauthorizedAccessException("Forbidden");
     }
+    public bool CanAdmin(HttpContext context) => demoMode
+        ? context.Connection.RemoteIpAddress is { } address && System.Net.IPAddress.IsLoopback(address)
+        : context.Items["caller"] is Caller{IsAdmin:true};
+    public void Admin(HttpContext context)
+    {if(!CanAdmin(context))throw new UnauthorizedAccessException("Forbidden");}
     public async Task<object> LoginAsync(string email,string password,CancellationToken ct)
     {
         if(string.IsNullOrWhiteSpace(email)||string.IsNullOrWhiteSpace(password))throw new ArgumentException("יש להזין דוא״ל וסיסמה");

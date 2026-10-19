@@ -22,7 +22,7 @@ try:
  run(['docker','exec','carwise-postgres','psql','-U','carwise','-d',name,'-v','ON_ERROR_STOP=1','-c',"DO $$ BEGIN IF NOT EXISTS(SELECT FROM pg_roles WHERE rolname='service_role') THEN CREATE ROLE service_role NOLOGIN BYPASSRLS; END IF; IF NOT EXISTS(SELECT FROM pg_roles WHERE rolname='anon') THEN CREATE ROLE anon NOLOGIN NOBYPASSRLS; END IF; END $$;"],stdout=subprocess.DEVNULL)
  config=json.loads((ROOT/'.local/appsettings.Development.json').read_text())
  connection=re.sub(r'Database=[^;]+',f'Database={name}',config['ConnectionStrings']['CarWise'])
- env={**os.environ,'ConnectionStrings__CarWise':connection,'ASPNETCORE_ENVIRONMENT':'Development'}
+ env={**os.environ,'ConnectionStrings__CarWise':connection,'ASPNETCORE_ENVIRONMENT':'Development','SUPABASE_URL':'','CARWISE_SUPABASE_KEY':'','CARWISE_AI_API_KEY':''}
  run(['node','scripts/dotnet.mjs','run','--project','backend/CarWise.Api','--no-launch-profile','--no-build','--','--import-data'],env=env,stdout=subprocess.DEVNULL)
  if subprocess.run(['docker','network','inspect','carwise-dev'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode:run(['docker','network','create','carwise-dev'],stdout=subprocess.DEVNULL)
  networks=json.loads(subprocess.check_output(['docker','inspect','--format','{{json .NetworkSettings.Networks}}','carwise-postgres']))
@@ -51,6 +51,7 @@ try:
    def log_message(self,*args):pass
    def do_GET(self):self.forward()
    def do_POST(self):self.forward()
+   def do_PATCH(self):self.forward()
    def forward(self):
     if not self.path.startswith('/rest/v1/'):
      self.send_error(404);return
@@ -82,6 +83,8 @@ try:
      time.sleep(.1)
    else:raise RuntimeError('Supabase adapter startup timed out')
    assert query('/runtime')['database']=='Supabase/PostgreSQL'
+   from importlib.machinery import SourceFileLoader
+   SourceFileLoader('admin_checks',str(ROOT/'scripts/admin-checks.py')).load_module().check_admin(query,name)
    data=query('/data');assert data['officialCount']==77988
    e=data['employees'][0];r=query('/simulate',{'employee':e});a=next(r for r in r['results'] if r['id']=='CAR-10');assert round(a['net'])==11693
    ticket=query('/tickets',{'employee':e,'target':'CAR-10','question':'בדיקת ההשתתפות דרך Supabase adapter'})

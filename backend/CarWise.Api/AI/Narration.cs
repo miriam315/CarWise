@@ -14,15 +14,15 @@ public static class FinancialText
     public static string Signed(decimal value)=>(value>=0?"+":"−")+Number(Math.Abs(value));
     public static string Template(Alternative a)=>$"בחלופה {a.Car?.Model??"ויתור על הרכב"}, הנטו המשוער שלך יהיה {Number(a.Net)} ₪ בחודש — שינוי של {Signed(a.Delta)} ₪ לעומת היום.\n"+
         $"שווי השימוש: {Number(a.Value)} ₪; השתתפות: {Number(a.Participation)} ₪. "+
-        (a.ElectricNet>0?"כלולים 250 ₪ נטו החזר חשמל, עם גילום מס מלא. ":"")+
+        (a.ElectricNet>0?$"כלולים {Number(a.ElectricNet)} ₪ נטו החזר חשמל לפי המדיניות. ":"")+
         (a.FamilyGap>0?$"חלקך בפער המסלול המשפחתי: {Number(a.FamilyGap)} ₪. ":"")+
-        (a.Maintenance>0?$"אחזקת הרכב: {Number(a.Maintenance)} ₪ ברוטו, חייבת במס ואינה פנסיונית. ":"")+"\n"+a.Reason+". הפירוט זמין בתצוגת ההשוואה.";
+        (a.Maintenance>0?$"אחזקת הרכב: {Number(a.Maintenance)} ₪ ברוטו; מס והפרשות לפי המדיניות הפעילה. ":"")+"\n"+a.Reason+". הפירוט זמין בתצוגת ההשוואה.";
 }
 public sealed class TemplateNarrationService : IResponseNarrationService
 {
     public Task<string> NarrateAsync(Alternative a,CancellationToken ct)=>Task.FromResult(FinancialText.Template(a));
 }
-public sealed class AiNarrationService(AiGateway gateway,ILogger<AiNarrationService> logger) : IResponseNarrationService
+public sealed class AiNarrationService(IAiCompletionClient gateway,ILogger<AiNarrationService> logger) : IResponseNarrationService
 {
     public static bool ValidTemplate(string text)
     {

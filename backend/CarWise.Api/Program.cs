@@ -1,3 +1,6 @@
+using CarWise.Api.Accounting;
+using CarWise.Api.Administration;
+using Microsoft.AspNetCore.DataProtection;
 using System.Threading.RateLimiting;
 using System.Net.Http.Headers;
 using System.Text.Json;
@@ -14,7 +17,7 @@ builder.Configuration.AddJsonFile(Path.Combine(root,".local","appsettings.Develo
 // Environment variables override ignored local settings; secrets never enter tracked configuration.
 builder.Configuration.AddEnvironmentVariables();
 builder.WebHost.UseUrls(builder.Configuration["ASPNETCORE_URLS"]??"http://0.0.0.0:8000");
-builder.WebHost.ConfigureKestrel(o=>o.Limits.MaxRequestBodySize=100_000);
+builder.WebHost.ConfigureKestrel(o=>o.Limits.MaxRequestBodySize=2_000_000);
 builder.Services.ConfigureHttpJsonOptions(o=>o.SerializerOptions.PropertyNamingPolicy=JsonNamingPolicy.CamelCase);
 var demo=builder.Environment.IsDevelopment() && builder.Configuration.GetValue("CarWise:DemoMode",true);
 var supabaseUrl=builder.Configuration["SUPABASE_URL"]??builder.Configuration["Supabase:Url"];
@@ -62,31 +65,43 @@ if(args.Contains("--import-data"))
 }
 if(database is PostgresDatabase && !await repository.HasReferenceDataAsync())await repository.SeedAsync(ReferenceData.FromFiles(dataPath));
 var reference=await repository.LoadAsync();
-builder.Services.AddSingleton(reference);builder.Services.AddSingleton<PayrollEngine>();
+var defaultProfile=new AiProfile{Model=builder.Configuration["Ai:Model"]??"gpt-4.1-mini",BaseUrl=builder.Configuration["Ai:BaseUrl"]??"https://api.openai.com/v1/"};
+var defaultAi=new AiConfiguration(!string.IsNullOrWhiteSpace(builder.Configuration["CARWISE_AI_API_KEY"]??builder.Configuration["Ai:ApiKey"]),defaultProfile,defaultProfile);
+var defaultConfig=new ManagedConfiguration(reference.Rules.DeepClone(),reference.Cars,reference.OccupationDocuments,reference.Employees,defaultAi);
+var initial=new ConfigurationDocument(0,DateTimeOffset.UtcNow,"system","הגדרות ראשוניות",defaultConfig,[]);
+var state=new ConfigurationState(new(initial,reference));
+builder.Services.AddSingleton(state);builder.Services.AddSingleton(new ConfigurationValidator(reference));
+builder.Services.AddScoped(sp=>sp.GetRequiredService<ConfigurationState>().Current);
+builder.Services.AddScoped(sp=>sp.GetRequiredService<ConfigurationSnapshot>().Data);
+builder.Services.AddScoped<PayrollEngine>();
 builder.Services.AddSingleton(repository);builder.Services.AddSingleton(database);
-var aiKey=builder.Configuration["CARWISE_AI_API_KEY"]??builder.Configuration["Ai:ApiKey"];
-if(!string.IsNullOrWhiteSpace(aiKey))
-{
-    var aiUri=new Uri((builder.Configuration["Ai:BaseUrl"]??"https://api.openai.com/v1/").TrimEnd('/')+"/");
-    if(aiUri.Scheme!="https")throw new InvalidOperationException("AI provider requires HTTPS.");
-    var client=new HttpClient{BaseAddress=aiUri,Timeout=TimeSpan.FromSeconds(35)};
-    client.DefaultRequestHeaders.Authorization=new AuthenticationHeaderValue("Bearer",aiKey);
-    builder.Services.AddSingleton(new AiGateway(client,builder.Configuration["Ai:Model"]??"gpt-4.1-mini"));
-    builder.Services.AddSingleton<IDataExtractionService,AiExtractionService>();
-    builder.Services.AddSingleton<IResponseNarrationService,AiNarrationService>();
-}
-else
-{
-    builder.Services.AddSingleton<IDataExtractionService,LocalExtractionService>();
-    builder.Services.AddSingleton<IResponseNarrationService,TemplateNarrationService>();
-}
+var keyDirectory=Environment.GetEnvironmentVariable("CARWISE_KEYRING_DIR")??Path.Combine(root,".local","admin-keys");
+Directory.CreateDirectory(keyDirectory);
+if(!OperatingSystem.IsWindows())File.SetUnixFileMode(keyDirectory,UnixFileMode.UserRead|UnixFileMode.UserWrite|UnixFileMode.UserExecute);
+builder.Services.AddDataProtection().SetApplicationName("CarWise.Administration").PersistKeysToFileSystem(new DirectoryInfo(keyDirectory));
+builder.Services.AddSingleton<SecretVault>();builder.Services.AddSingleton<ConfigurationService>();
+builder.Services.AddHostedService<ConfigurationRefreshWorker>();
+builder.Services.AddSingleton<ExchangeRates>();builder.Services.AddSingleton<UsageReports>();
+builder.Services.AddScoped<AiOperationContext>();builder.Services.AddScoped<UsageAccounting>();
+builder.Services.AddHttpClient("ExchangeRates",client=>client.Timeout=TimeSpan.FromSeconds(20)).ConfigurePrimaryHttpMessageHandler(()=>new SocketsHttpHandler{AllowAutoRedirect=false,UseCookies=false});
+builder.Services.AddHostedService<ExchangeRateWorker>();
+builder.Services.AddHttpClient("AiProviders").ConfigurePrimaryHttpMessageHandler(()=>new SocketsHttpHandler{AllowAutoRedirect=false,UseCookies=false});
+builder.Services.AddScoped<IDataExtractionService>(sp=>{
+    var ai=sp.GetRequiredService<ConfigurationSnapshot>().Document.Configuration.Ai;
+    return ai.Enabled?new AiExtractionService(new ConfiguredCompletionClient(ai.Extraction,sp.GetRequiredService<SecretVault>(),sp.GetRequiredService<IHttpClientFactory>(),accounting:sp.GetRequiredService<UsageAccounting>())):new LocalExtractionService();
+});
+builder.Services.AddScoped<IResponseNarrationService>(sp=>{
+    var ai=sp.GetRequiredService<ConfigurationSnapshot>().Document.Configuration.Ai;
+    return ai.Enabled?new AiNarrationService(new ConfiguredCompletionClient(ai.Narration,sp.GetRequiredService<SecretVault>(),sp.GetRequiredService<IHttpClientFactory>(),accounting:sp.GetRequiredService<UsageAccounting>()),sp.GetRequiredService<ILogger<AiNarrationService>>()):new TemplateNarrationService();
+});
 builder.Services.AddSingleton(new AccessControl(SupabaseClient(),demo));
-builder.Services.AddSingleton<AdvisorService>();
+builder.Services.AddScoped<AdvisorService>();
 builder.Services.AddRateLimiter(options=>{
     options.RejectionStatusCode=429;
     options.AddPolicy("login",context=>RateLimitPartition.GetFixedWindowLimiter(context.Connection.RemoteIpAddress?.ToString()??"unknown",_=>new FixedWindowRateLimiterOptions{PermitLimit=8,Window=TimeSpan.FromMinutes(1),QueueLimit=0}));
 });
 var app=builder.Build();
+await app.Services.GetRequiredService<ConfigurationService>().RefreshAsync(CancellationToken.None);
 app.UseRateLimiter();
 app.Use(async(context,next)=>
 {
@@ -119,23 +134,24 @@ app.Use(async(context,next)=>
         context.Response.StatusCode=500;await context.Response.WriteAsJsonAsync(new{error="אירעה שגיאת שרת. פרטי התקלה נשמרו בשרת ללא חשיפת נתונים."});
     }
 });
-app.MapGet("/api/runtime",(IDataExtractionService extraction)=>new{server="ASP.NET Core 10",database=repository.Provider,demoMode=demo,aiMode=extraction.Mode,authenticationRequired=!demo});
-app.MapGet("/api/health",async(CancellationToken ct)=>
+app.MapGet("/api/runtime",(IDataExtractionService extraction)=>new{server="ASP.NET Core 10",database=repository.Provider,demoMode=demo,aiMode=extraction.Mode,authenticationRequired=!demo,configurationRevision=state.Current.Document.Revision});
+app.MapGet("/api/health",async(ReferenceData current,CancellationToken ct)=>
 {
     await repository.HasReferenceDataAsync(ct);
-    return Results.Ok(new{status="ok",records=reference.Official.Count,method="C# decimal / monthly 2025",database=repository.Provider});
+    return Results.Ok(new{status="ok",records=reference.Official.Count,method=$"C# decimal / monthly {current.Rules["netMethod"]!["taxYear"]}",database=repository.Provider});
 });
 app.MapPost("/api/auth/login",async(LoginRequest request,AccessControl access,CancellationToken ct)=>
 {
     if(demo)return Results.BadRequest(new{error="מצב הדגמה אינו דורש התחברות"});
     return Results.Ok(await access.LoginAsync(request.Email,request.Password,ct));
 }).WithMetadata(new Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute("login"));
-app.MapGet("/api/data",(HttpContext context)=>new{
+app.MapGet("/api/data",(HttpContext context,ReferenceData reference,AccessControl access)=>new{
     cars=reference.Cars.Select(reference.Enrich),employees=reference.Employees.Where(e=>demo || context.Items["caller"] is Caller c && e.Id==c.EmployeeId),
-    occupations=reference.OccupationDocuments,rules=reference.Rules,officialCount=reference.Official.Count});
+    occupations=reference.OccupationDocuments,rules=reference.Rules,officialCount=reference.Official.Count,canAdmin=access.CanAdmin(context),configurationRevision=state.Current.Document.Revision});
 void AuthorizeEmployee(HttpContext context,AccessControl access,Employee employee)
 {
     access.Employee(context,employee.Id);
+    var reference=context.RequestServices.GetRequiredService<ReferenceData>();
     if(!demo && reference.Employees.SingleOrDefault(e=>e.Id==employee.Id)?.Occupation!=employee.Occupation)
         throw new UnauthorizedAccessException("Forbidden");
 }
@@ -164,9 +180,9 @@ app.MapGet("/api/conversation/{employee}",async(string employee,HttpContext cont
 });
 app.MapPost("/api/chat",async(ChatRequest request,HttpContext context,AccessControl access,AdvisorService advisor,CancellationToken ct)=>
 {
-    AuthorizeEmployee(context,access,request.Employee);return await advisor.ChatAsync(request,ct);
+    AuthorizeEmployee(context,access,request.Employee);context.RequestServices.GetRequiredService<AiOperationContext>().ConversationId=request.Employee.Id;return await advisor.ChatAsync(request,ct);
 });
-app.MapPost("/api/tickets",async(TicketRequest request,HttpContext context,AccessControl access,PayrollEngine engine,CancellationToken ct)=>
+app.MapPost("/api/tickets",async(TicketRequest request,HttpContext context,AccessControl access,PayrollEngine engine,ReferenceData reference,CancellationToken ct)=>
 {
     AuthorizeEmployee(context,access,request.Employee);var e=engine.Validate(request.Employee);
     var car=reference.Cars.SingleOrDefault(c=>c.Id==request.Target)??throw new ArgumentException("בחרו רכב מתוך הקטלוג");
@@ -184,7 +200,7 @@ app.MapPost("/api/tickets/{id:guid}",async(Guid id,AnswerRequest request,HttpCon
     if(ticket is null)return Results.NotFound(new{error="הפנייה לא נמצאה"});
     var conversation=await repository.ConversationAsync(ticket.EmployeeId,ct);
     var e=conversation?.Employee??ticket.Snapshot;
-    var engine=app.Services.GetRequiredService<PayrollEngine>();
+    var engine=context.RequestServices.GetRequiredService<PayrollEngine>();
     var current=engine.Simulate(e,new Dictionary<string,decimal>{{ticket.Target,request.Participation}});
     var r=current.Results.Single(r=>r.Id==ticket.Target);
     if(!r.Eligible)throw new ArgumentException("הזכאות השתנתה; יש לעדכן את פרטי העובד לפני אישור ההשתתפות");
@@ -192,6 +208,7 @@ app.MapPost("/api/tickets/{id:guid}",async(Guid id,AnswerRequest request,HttpCon
         $"חישבתי מחדש עבור {r.Car!.Model}: נטו {FinancialText.Number(r.Net)} ₪; הפרש {FinancialText.Signed(r.Delta)} ₪ בחודש.";
     await repository.ResolveAsync(id,request.Participation,request.Answer.Trim(),text,ct);return Results.Ok(new{status="resolved"});
 });
+app.MapAdministration(repository.Provider,supabaseUrl,demo);
 var dist=Path.Combine(root,"dist");
 if(!Directory.Exists(dist))dist=Path.Combine(AppContext.BaseDirectory,"wwwroot");
 if(Directory.Exists(dist))

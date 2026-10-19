@@ -21,13 +21,13 @@ public sealed class AiTests
     [Fact] public async Task ExtractionUsesTypedProviderAndCannotInventAValue()
     {
         using var http=new HttpClient(new FakeHttp(_=>Completion(new ExtractedData{Salary=99999m}))){BaseAddress=new("https://example.invalid/v1/")};
-        var service=new AiExtractionService(new(http,"test-model"));
+        var service=new AiExtractionService(new AiGateway(http,"test-model"));
         await Assert.ThrowsAsync<AiUnavailableException>(()=>service.ExtractAsync("שלום",Data.Employees[0],[],default));
     }
     [Fact] public async Task ExplicitFieldsAreExtractedAsDecimals()
     {
         using var http=new HttpClient(new FakeHttp(_=>Completion(new ExtractedData{Salary=19500m,Pension=6.5m}))){BaseAddress=new("https://example.invalid/v1/")};
-        var result=await new AiExtractionService(new(http,"test-model")).ExtractAsync("שכר 19500 פנסיה 6.5",Data.Employees[0],[],default);
+        var result=await new AiExtractionService(new AiGateway(http,"test-model")).ExtractAsync("שכר 19500 פנסיה 6.5",Data.Employees[0],[],default);
         Assert.Equal(19500m,result.Salary);Assert.Equal(6.5m,result.Pension);
     }
     [Fact] public async Task LocalModeDoesNotInferUnstatedFields()
@@ -46,14 +46,14 @@ public sealed class AiTests
     [Fact] public async Task ModelCannotOverrideNetNumbers()
     {
         using var http=new HttpClient(new FakeHttp(_=>Completion(new{text="תקבלי 999999 ₪"}))){BaseAddress=new("https://example.invalid/v1/")};
-        var service=new AiNarrationService(new(http,"test"),NullLogger<AiNarrationService>.Instance);
+        var service=new AiNarrationService(new AiGateway(http,"test"),NullLogger<AiNarrationService>.Instance);
         var alternative=new PayrollEngine(Data).Simulate(Data.Employees[0]).Results.Single(r=>r.Id=="CAR-10");
         Assert.Equal(FinancialText.Template(alternative),await service.NarrateAsync(alternative,default));
     }
     [Fact] public async Task ProviderFailureProducesExplicitUnavailableResult()
     {
         using var http=new HttpClient(new FakeHttp(_=>new(HttpStatusCode.Unauthorized))){BaseAddress=new("https://example.invalid/v1/")};
-        await Assert.ThrowsAsync<AiUnavailableException>(()=>new AiExtractionService(new(http,"test")).ExtractAsync("שלום",Data.Employees[0],[],default));
+        await Assert.ThrowsAnyAsync<AiUnavailableException>(()=>new AiExtractionService(new AiGateway(http,"test")).ExtractAsync("שלום",Data.Employees[0],[],default));
     }
     [Fact] public async Task AuthDoesNotTrustUserEditableRole()
     {

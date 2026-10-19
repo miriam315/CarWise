@@ -9,7 +9,7 @@ def request(path,body=None):
  with urllib.request.urlopen(urllib.request.Request(BASE+'/api'+path,data=data,headers={'Content-Type':'application/json'})) as r:return json.load(r)
 def start(state):
  process=subprocess.Popen(['node','scripts/dotnet.mjs','run','--project','backend/CarWise.Api','--no-launch-profile','--no-build'],cwd=ROOT,
-  env={**os.environ,'ASPNETCORE_ENVIRONMENT':'Development','ASPNETCORE_URLS':BASE,'ConnectionStrings__CarWise':state},
+  env={**os.environ,'ASPNETCORE_ENVIRONMENT':'Development','ASPNETCORE_URLS':BASE,'ConnectionStrings__CarWise':state,'SUPABASE_URL':'','CARWISE_SUPABASE_KEY':'','CARWISE_AI_API_KEY':''},
   stdout=(ROOT/'.local/smoke-server.log').open('w'),stderr=subprocess.STDOUT,start_new_session=True)
  for _ in range(600):
   try:request('/health');return process
@@ -33,6 +33,8 @@ with tempfile.TemporaryDirectory(prefix='carwise-smoke-') as temp:
  connection=re.sub(r'Database=[^;]+',f'Database={dbname}',config['ConnectionStrings']['CarWise'])
  process=start(connection)
  try:
+  from importlib.machinery import SourceFileLoader
+  admin_revision=SourceFileLoader('admin_checks',str(ROOT/'scripts/admin-checks.py')).load_module().check_admin(request,dbname)
   data=request('/data');assert data['officialCount']==77988
   employee=data['employees'][0]
   runtime=request('/runtime');assert runtime['server']=='ASP.NET Core 10' and runtime['database']=='PostgreSQL'
@@ -107,13 +109,43 @@ with tempfile.TemporaryDirectory(prefix='carwise-smoke-') as temp:
    nav('הסקירה שלי');page.wait_for_selector('.vehicles-grid')
    page.get_by_label('בחירת עובד לדוגמה').select_option('E-001')
    page.wait_for_timeout(400)
+   nav('ניהול המערכת');page.wait_for_selector('.admin-page')
+   for label in ['ספקי AI','עלויות AI ושער דולר','מדיניות רכב','מס והפרשות','קטלוג רכבים','עיסוקים','עובדים','היסטוריה','סקירה']:
+    page.get_by_role('tab',name=label,exact=True).click()
+    assert not page.evaluate('document.documentElement.scrollWidth > innerWidth')
+   page.screenshot(path=str(screenshots/'admin-desktop.png'),full_page=True)
+   page.get_by_role('tab',name='עלויות AI ושער דולר',exact=True).click()
+   expect(page.get_by_role('heading',name='יומן שימוש ועלויות')).to_be_visible()
+   page.get_by_role('button',name='הוספת המודלים הנבחרים').click()
+   page.get_by_label('gpt-4.1-mini inputUsdPerMillion',exact=True).fill('1')
+   page.get_by_label('gpt-4.1-mini cachedInputUsdPerMillion',exact=True).fill('0.5')
+   page.get_by_label('gpt-4.1-mini outputUsdPerMillion',exact=True).fill('2')
+   page.get_by_label('מקור תעריף gpt-4.1-mini',exact=True).fill('TEST ONLY - not a live quote')
+   page.get_by_label('סיבת שינוי הגדרות').fill('browser test pricing configuration')
+   page.get_by_role('button',name='שמירה והפעלה',exact=True).click()
+   expect(page.locator('.admin-success')).to_contain_text('נשמרו והופעלו')
+   assert request('/admin/configuration')['configuration']['ai']['pricing'][0]['inputUsdPerMillion']==1
+   page.screenshot(path=str(screenshots/'admin-costs.png'),full_page=True)
+   saved=request('/admin/configuration')
+   reverted=request('/admin/restore',{'expectedRevision':saved['revision'],'revision':admin_revision,'note':'restore after browser pricing test'})
+   admin_revision=reverted['revision']
+   nav('הסקירה שלי')
    page.set_viewport_size({'width':390,'height':844});page.wait_for_timeout(350);page.screenshot(path=str(screenshots/'mobile.png'),full_page=True)
    assert not page.evaluate('document.documentElement.scrollWidth > innerWidth')
    page.get_by_role('button',name='פתיחת תפריט').click();nav('קטלוג הרכבים');expect(page.locator('.catalog-grid')).to_be_visible()
+   page.get_by_role('button',name='פתיחת תפריט').click();nav('ניהול המערכת')
+   page.wait_for_selector('.admin-page')
+   page.get_by_role('tab',name='עלויות AI ושער דולר',exact=True).click()
+   expect(page.get_by_role('heading',name='יומן שימוש ועלויות')).to_be_visible()
+   assert not page.evaluate('document.documentElement.scrollWidth > innerWidth')
+   page.wait_for_timeout(350)
+   heading=page.locator('.admin-page h1').bounding_box();assert heading['x']>=0 and heading['x']+heading['width']<=390
+   page.screenshot(path=str(screenshots/'admin-mobile.png'),full_page=True)
    assert not errors,errors
    browser.close()
   # Restart the API and confirm answer, participation and resumed conversation survived.
   stop(process);process=start(connection)
+  assert request('/admin/configuration')['revision']==admin_revision
   t=request('/tickets');assert len(t)==1 and t[0]['status']=='resolved' and t[0]['participation']==350
   assert any('הנציג ענה' in m['text'] for m in request('/history/E-001'))
   print('PASS: salary edits, catalogue filtering, official keys, pending/resolved handoff, conversation resume, six employee profiles, waiver denial, desktop/mobile overflow, persisted restart; no browser errors.')

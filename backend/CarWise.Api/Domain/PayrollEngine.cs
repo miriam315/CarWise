@@ -26,25 +26,30 @@ public sealed class PayrollEngine(ReferenceData data)
         if(car is null) return (o.Waiver,o.Waiver?"העיסוק מאפשר ויתור על רכב":"בתפקיד שטח הרכב הוא כלי עבודה ולכן אי אפשר לוותר עליו");
         if(car.Group=="משפחתי")
         {
-            var ok=e.Children>=Number(data.Rules["familyTrack"]!["minChildren"]);
-            return (ok,ok?"מסלול משפחתי: לפחות 4 ילדים עד גיל 23; חלוקת פער התקציב 50/50":"המסלול המשפחתי דורש לפחות 4 ילדים עד גיל 23");
+            var min=Number(data.Rules["familyTrack"]!["minChildren"]);var age=Number(data.Rules["familyTrack"]!["childMaxAge"]);var ok=e.Children>=min;
+            return (ok,ok?$"מסלול משפחתי: לפחות {min} ילדים עד גיל {age}; פער התקציב מתחלק לפי המדיניות":$"המסלול המשפחתי דורש לפחות {min} ילדים עד גיל {age}");
         }
         var order=data.Rules["groupOrder"]!.AsArray().Select(x=>x!.GetValue<string>()).ToList();
-        var eligible=order.IndexOf(car.Group)<=order.IndexOf(o.Group);
-        return (eligible,eligible?"הרכב בקבוצת הזכאות שלך או בקבוצה נמוכה ממנה":"הרכב בקבוצה גבוהה מקבוצת הזכאות שלך");
+        var ownOnly=data.Rules["chooseFrom"]!.GetValue<string>()=="own_group_only";
+        var eligible=ownOnly?car.Group==o.Group:order.IndexOf(car.Group)<=order.IndexOf(o.Group);
+        return (eligible,eligible?(ownOnly?"הרכב בקבוצת הזכאות שלך":"הרכב בקבוצת הזכאות שלך או בקבוצה נמוכה ממנה"):(ownOnly?"המדיניות מאפשרת בחירה רק מתוך קבוצת הזכאות שלך":"הרכב בקבוצה גבוהה מקבוצת הזכאות שלך"));
     }
     public Amounts Calculate(Employee employee,Car? car,decimal? participation=null)
     {
         var e=Validate(employee); var occupation=data.OccupationFor(e.Occupation);
-        var gross=e.Salary+e.Commission+e.Bonus;var pension=gross*e.Pension/100m;var fund=gross*e.Fund/100m;
+        var gross=e.Salary+e.Commission+e.Bonus;
         var maintenance=car is null?occupation.Maintenance:0m;var value=car is null?0m:data.Lookup(car).Value;
+        var contributions=N["contributionsBase"]!.GetValue<string>()=="base"?e.Salary:gross;
+        if(data.Rules["waiver"]!["maintenanceIsPensionable"]!.GetValue<bool>())contributions+=maintenance;
+        var pension=contributions*e.Pension/100m;var fund=contributions*e.Fund/100m;
+        var taxableMaintenance=data.Rules["waiver"]!["maintenanceIsTaxable"]!.GetValue<bool>()?maintenance:0m;
         var part=car is null?0m:participation??car.Participation;
         if(part<0 || part>20000) throw new ArgumentException("השתתפות לא תקינה");
         var budget=Number(data.Rules["budgets"]![occupation.Group]);
         var family=car?.Group=="משפחתי"?Math.Max(0m,car.Cost-budget)*Number(data.Rules["familyTrack"]!["gapSplitEmployee"]):0m;
         (decimal Net,decimal Tax,decimal Insurance,decimal Taxable) Payroll(decimal extra)
         {
-            var taxable=gross+maintenance+value+extra;var tax=0m;var lower=0m;
+            var taxable=gross+taxableMaintenance+value+extra;var tax=0m;var lower=0m;
             foreach(var b in N["brackets"]!.AsArray())
             {
                 var upper=b![0] is null?taxable:Number(b[0]);
@@ -68,7 +73,7 @@ public sealed class PayrollEngine(ReferenceData data)
             var target=Number(data.Rules["electric"]!["netBonus"]);
             if(data.Rules["electric"]!["method"]!.GetValue<string>()=="gross_up")
             {
-                var low=0m;var high=target*10m;
+                var low=0m;var high=target*100m;
                 for(var i=0;i<100;i++)
                 {
                     var mid=(low+high)/2m;

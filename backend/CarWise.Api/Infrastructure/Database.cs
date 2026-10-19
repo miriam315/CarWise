@@ -13,6 +13,7 @@ public interface IJsonDatabase
     Task UpsertAsync(string table, JsonArray rows, CancellationToken ct=default);
     Task<JsonNode> RpcAsync(string name, JsonObject parameters, CancellationToken ct=default);
     Task AddMessageAsync(string employee,string role,string text,CancellationToken ct=default);
+    Task<bool> TryWriteRuleAsync(string id,long? expectedRevision,JsonNode document,CancellationToken ct=default);
 }
 public sealed class PostgresDatabase(NpgsqlDataSource source) : IJsonDatabase
 {
@@ -33,6 +34,12 @@ public sealed class PostgresDatabase(NpgsqlDataSource source) : IJsonDatabase
         await using var command=conn.CreateCommand();
         if(filters is not null) foreach(var (key,value) in filters)
         {
+            if(key=="document->>conversationId")
+            {var cp="p"+clauses.Count;clauses.Add($"t.document->>'conversationId'=@{cp}");command.Parameters.AddWithValue(cp,value);continue;}
+            if(key=="id_prefix")
+            {
+                var prefixParameter="p"+clauses.Count;clauses.Add($"t.id LIKE @{prefixParameter}");command.Parameters.AddWithValue(prefixParameter,value.Replace("\\","\\\\").Replace("%","\\%").Replace("_","\\_")+"%");continue;
+            }
             if(key is not ("employee_id" or "status" or "id"))throw new ArgumentException("Unknown filter");
             var parameter="p"+clauses.Count;clauses.Add($"t.{key}::text=@{parameter}");command.Parameters.AddWithValue(parameter,value);
         }
@@ -66,6 +73,16 @@ public sealed class PostgresDatabase(NpgsqlDataSource source) : IJsonDatabase
         command.CommandText=$"SELECT {name}({string.Join(',',parts)})::text";
         return JsonNode.Parse((string)(await command.ExecuteScalarAsync(ct)??"{}"))!;
     }
+    public async Task<bool> TryWriteRuleAsync(string id,long? expectedRevision,JsonNode document,CancellationToken ct=default)
+    {
+        var sql=expectedRevision is null
+            ? "INSERT INTO carwise_rules(id,document) VALUES(@id,@document) ON CONFLICT(id) DO NOTHING RETURNING id"
+            : "UPDATE carwise_rules SET document=@document WHERE id=@id AND document->>'revision'=@revision RETURNING id";
+        await using var command=source.CreateCommand(sql);
+        command.Parameters.AddWithValue("id",id);command.Parameters.AddWithValue("document",NpgsqlDbType.Jsonb,document.ToJsonString());
+        if(expectedRevision is not null)command.Parameters.AddWithValue("revision",expectedRevision.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        return await command.ExecuteScalarAsync(ct) is not null;
+    }
     public async Task AddMessageAsync(string employee,string role,string text,CancellationToken ct=default)
     {
         await using var command=source.CreateCommand("INSERT INTO carwise_messages(employee_id,role,text) VALUES(@e,@r,@t)");
@@ -90,7 +107,7 @@ public sealed class SupabaseDatabase(HttpClient client) : IJsonDatabase
     {
         var query=$"rest/v1/{Uri.EscapeDataString(table)}?select=*&order="+(table=="carwise_conversations"?"employee_id":"id")+$".asc&offset={offset}&limit={limit}";
         if(afterId is not null)query+="&id=gt."+Uri.EscapeDataString(afterId);
-        if(filters is not null)foreach(var (key,value) in filters)query+=$"&{Uri.EscapeDataString(key)}=eq.{Uri.EscapeDataString(value)}";
+        if(filters is not null)foreach(var (key,value) in filters)query+=key=="id_prefix"?"&id=like."+Uri.EscapeDataString(value+"*"):$"&{Uri.EscapeDataString(key)}=eq.{Uri.EscapeDataString(value)}";
         return (await SendAsync(new(HttpMethod.Get,query),ct)).AsArray();
     }
     public async Task UpsertAsync(string table,JsonArray rows,CancellationToken ct=default)
@@ -100,6 +117,23 @@ public sealed class SupabaseDatabase(HttpClient client) : IJsonDatabase
     }
     public Task<JsonNode> RpcAsync(string name,JsonObject parameters,CancellationToken ct=default) =>
         SendAsync(new(HttpMethod.Post,$"rest/v1/rpc/{name}"){Content=JsonContent.Create(parameters)},ct);
+    public async Task<bool> TryWriteRuleAsync(string id,long? expectedRevision,JsonNode document,CancellationToken ct=default)
+    {
+        var query="rest/v1/carwise_rules";
+        HttpRequestMessage request;
+        if(expectedRevision is null)
+        {
+            request=new(HttpMethod.Post,query+"?on_conflict=id"){Content=JsonContent.Create(new[]{new{id,document}})};
+            request.Headers.TryAddWithoutValidation("Prefer","resolution=ignore-duplicates,return=representation");
+        }
+        else
+        {
+            query+="?id=eq."+Uri.EscapeDataString(id)+"&document-%3E%3Erevision=eq."+expectedRevision.Value;
+            request=new(HttpMethod.Patch,query){Content=JsonContent.Create(new{document})};
+            request.Headers.TryAddWithoutValidation("Prefer","return=representation");
+        }
+        return (await SendAsync(request,ct)).AsArray().Count==1;
+    }
     public async Task AddMessageAsync(string employee,string role,string text,CancellationToken ct=default) =>
         await SendAsync(new(HttpMethod.Post,"rest/v1/carwise_messages"){Content=JsonContent.Create(new{employee_id=employee,role,text})},ct);
 }

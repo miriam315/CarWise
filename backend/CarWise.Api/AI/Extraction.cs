@@ -50,7 +50,7 @@ public sealed class LocalExtractionService : IDataExtractionService
         });
     }
 }
-public sealed class AiExtractionService(AiGateway gateway) : IDataExtractionService
+public sealed class AiExtractionService(IAiCompletionClient gateway) : IDataExtractionService
 {
     public string Mode=>"ai";
     internal static readonly JsonNode Schema=JsonNode.Parse("""
@@ -83,17 +83,22 @@ public sealed class AiExtractionService(AiGateway gateway) : IDataExtractionServ
         return extracted;
     }
 }
-public sealed class AiUnavailableException(string message) : Exception(message);
-public sealed class AiGateway(HttpClient client,string model)
+public class AiUnavailableException(string message) : Exception(message);
+public interface IAiCompletionClient
+{
+    Task<string> CompleteAsync(string name,JsonNode schema,string instructions,string text,CancellationToken ct);
+}
+public sealed class AiGateway(HttpClient client,string model,int maxOutputTokens=1200,Action<JsonNode?>? observe=null) : IAiCompletionClient
 {
     public async Task<string> CompleteAsync(string name,JsonNode schema,string instructions,string text,CancellationToken ct)
     {
         using var response=await client.PostAsJsonAsync("chat/completions",new{
             model,messages=new[]{new{role="system",content=instructions},new{role="user",content=text}},
-            response_format=new{type="json_schema",json_schema=new{name,strict=true,schema}},max_completion_tokens=1200
+            response_format=new{type="json_schema",json_schema=new{name,strict=true,schema}},max_completion_tokens=maxOutputTokens
         },ct);
-        if(!response.IsSuccessStatusCode)throw new AiUnavailableException("שירות ה־AI אינו זמין כרגע. אפשר לבחור רכב ולעדכן נתונים בטופס; החישוב בשרת ממשיך לפעול.");
+        if(!response.IsSuccessStatusCode)throw await AiProviderException.FromResponseAsync(response,ct);
         var result=JsonNode.Parse(await response.Content.ReadAsStringAsync(ct));
+        observe?.Invoke(result);
         var choice=result?["choices"]?[0];
         if(choice?["finish_reason"]?.GetValue<string>()!="stop" || choice?["message"]?["refusal"] is not null)
             throw new AiUnavailableException("המודל לא החזיר תשובה מובנית מלאה. אפשר לבחור חלופה מהקטלוג.");
