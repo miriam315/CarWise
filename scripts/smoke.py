@@ -170,6 +170,7 @@ with tempfile.TemporaryDirectory(prefix='carwise-smoke-') as temp:
    expect(page.locator('.admin-success')).to_contain_text('הופעלה')
    admin_revision=request('/admin/configuration')['revision']
    page.screenshot(path=str(screenshots/'official-versions.png'),full_page=True)
+   admin_revision=SourceFileLoader('ai_model_checks',str(ROOT/'scripts/ai-model-checks.py')).load_module().check(page,request,nav,screenshots)
    # A synthetic provider response tests employee review without sending any real document or paid request.
    def mock_data(route):
     response=route.fetch();body=response.json();body['payslipEnabled']=True;route.fulfill(response=response,json=body)

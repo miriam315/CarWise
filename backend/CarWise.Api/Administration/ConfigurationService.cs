@@ -1,9 +1,10 @@
 using System.Text.Json.Nodes;
 using CarWise.Api.Domain;
+using CarWise.Api.AI;
 using CarWise.Api.Infrastructure;
 namespace CarWise.Api.Administration;
 
-public sealed class ConfigurationService(IJsonDatabase database,ConfigurationState state,ConfigurationValidator validator,SecretVault vault,OfficialVersions? versions=null)
+public sealed class ConfigurationService(IJsonDatabase database,ConfigurationState state,ConfigurationValidator validator,SecretVault vault,OfficialVersions? versions=null,AiKeyHealth? keyHealth=null)
 {
     private readonly SemaphoreSlim gate=new(1,1);
     public ConfigurationState State=>state;
@@ -26,10 +27,29 @@ public sealed class ConfigurationService(IJsonDatabase database,ConfigurationSta
     public async Task<object> ViewAsync(CancellationToken ct)
     {
         await RefreshAsync(ct);var current=state.Current.Document;
+        var pools=new Dictionary<string,object[]>();
+        foreach(var model in current.Configuration.Ai.RegisteredModels())pools[model.Id]=await PoolAsync(model.Profile,ct);
         return new{current.Revision,current.SavedAt,current.Actor,current.Note,current.Configuration,
             history=current.History.Select(h=>new{h.Revision,h.SavedAt,h.Actor,h.Note}),
-            keyStatus=new{extraction=await vault.IsAvailableAsync(current.Configuration.Ai.Extraction.KeyReference,ct,new Uri(current.Configuration.Ai.Extraction.BaseUrl).Host),narration=await vault.IsAvailableAsync(current.Configuration.Ai.Narration.KeyReference,ct,new Uri(current.Configuration.Ai.Narration.BaseUrl).Host)}};
+            keyStatus=new{extraction=await HasKeyAsync(current.Configuration.Ai.ProfileFor("extraction"),ct),narration=await HasKeyAsync(current.Configuration.Ai.ProfileFor("narration"),ct)},
+            keyPools=pools};
     }
+    private async Task<bool> HasKeyAsync(AiProfile profile,CancellationToken ct)
+    {
+        foreach(var key in profile.Keys().Where(k=>k.Enabled))
+            if(await vault.IsAvailableAsync(key.KeyReference,ct,new Uri(profile.BaseUrl).Host))return true;
+        return false;
+    }
+    private async Task<object[]> PoolAsync(AiProfile profile,CancellationToken ct)
+    {
+        var list=new List<object>();foreach(var key in profile.Keys())
+        {
+            var failure=keyHealth?.Get(profile,key.KeyReference);
+            list.Add(new{key.Id,key.Name,key.Enabled,host=new Uri(profile.BaseUrl).Host,configured=await vault.IsAvailableAsync(key.KeyReference,ct,new Uri(profile.BaseUrl).Host),failure?.RetryAt,lastError=failure?.Code});
+        }
+        return list.ToArray();
+    }
+
     public async Task<ConfigurationDocument> SaveAsync(SaveConfigurationRequest request,string actor,CancellationToken ct)
     {
         await gate.WaitAsync(ct);
@@ -43,18 +63,36 @@ public sealed class ConfigurationService(IJsonDatabase database,ConfigurationSta
             _=validator.Validate(config,await OfficialAsync(config,ct));
             if(request.ApiKeys is not null)
             {
-                if(request.ApiKeys.Keys.Any(k=>k is not ("extraction" or "narration")))throw new ArgumentException("סוג מפתח אינו מוכר");
+                if(request.ApiKeys.Keys.Any(id=>!config.Ai.RegisteredModels().Any(m=>m.Id==id)))throw new ArgumentException("סוג מפתח אינו מוכר");
                 foreach(var (name,value) in request.ApiKeys.Where(x=>!string.IsNullOrWhiteSpace(x.Value)))
                 {
-                    var host=new Uri(name=="extraction"?config.Ai.Extraction.BaseUrl:config.Ai.Narration.BaseUrl).Host;
+                    var profile=config.Ai.RegisteredModels().Single(m=>m.Id==name).Profile;
+                    var host=new Uri(profile.BaseUrl).Host;
                     var reference=await vault.StoreAsync(value,host,ct);
-                    config=config with{Ai=name=="extraction"?config.Ai with{Extraction=config.Ai.Extraction with{KeyReference=reference}}:
-                        config.Ai with{Narration=config.Ai.Narration with{KeyReference=reference}}};
+                    config=config with{Ai=config.Ai.WithProfile(name,profile with{KeyReference=reference})};
+                }
+            }
+            if(request.BackupApiKeys is not null)
+            {
+                if(request.BackupApiKeys.Keys.Any(id=>!config.Ai.RegisteredModels().Any(m=>m.Id==id)))throw new ArgumentException("סוג מפתח אינו מוכר");
+                foreach(var (role,values) in request.BackupApiKeys)
+                {
+                    var profile=config.Ai.RegisteredModels().Single(m=>m.Id==role).Profile;
+                    if(values is null||values.Keys.Any(id=>!profile.BackupKeys.Any(k=>k.Id==id)))throw new ArgumentException("מזהה מפתח גיבוי אינו קיים בטיוטה");
+                    var backups=profile.BackupKeys.ToList();
+                    foreach(var (id,value) in values.Where(x=>!string.IsNullOrWhiteSpace(x.Value)))
+                    {
+                        var reference=await vault.StoreAsync(value,new Uri(profile.BaseUrl).Host,ct);
+                        var index=backups.FindIndex(k=>k.Id==id);backups[index]=backups[index] with{KeyReference=reference};
+                    }
+                    profile=profile with{BackupKeys=backups};
+                    config=config with{Ai=config.Ai.WithProfile(role,profile)};
                 }
             }
             var validated=validator.Validate(config,await OfficialAsync(config,ct));config=config with{Employees=validated.Employees};
-            if(config.Ai.Enabled && (!await vault.IsAvailableAsync(config.Ai.Extraction.KeyReference,ct,new Uri(config.Ai.Extraction.BaseUrl).Host)||!await vault.IsAvailableAsync(config.Ai.Narration.KeyReference,ct,new Uri(config.Ai.Narration.BaseUrl).Host)))
-                throw new ArgumentException("הפעלת AI דורשת מפתח זמין לכל אחד משני שלבי השיחה");
+            if(config.Ai.Enabled)
+                foreach(var service in config.Ai.PayslipEnabled?new[]{"extraction","narration","payslip"}:new[]{"extraction","narration"})
+                    if(!await HasKeyAsync(config.Ai.ProfileFor(service),ct))throw new ArgumentException("הפעלת AI דורשת מפתח זמין לכל שירות פעיל");
             var history=new List<ConfigurationVersion>{new(current.Revision,current.SavedAt,current.Actor,current.Note,current.Configuration)};
             history.AddRange(current.History);history=history.Take(10).ToList();
             var next=new ConfigurationDocument(current.Revision+1,DateTimeOffset.UtcNow,actor,request.Note.Trim(),config,history);

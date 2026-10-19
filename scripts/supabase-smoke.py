@@ -100,6 +100,7 @@ try:
    assert query('/conversation/E-001')['status']=='Active'
    assert any('הנציג ענה' in m['text'] for m in query('/history/E-001'))
    print('PASS: real Supabase/PostgREST adapter, 77,988 records, reference data, simulation, transactional agent RPC, conversation resume, anonymous RLS denial.')
+   SourceFileLoader('ai_registry_checks',str(ROOT/'scripts/ai-model-checks.py')).load_module().check_api(query)
    os.killpg(process.pid,signal.SIGTERM);process.wait(timeout=10)
    settings=Path(temp)/'server-settings'/'connection.json'
    env.update({'SUPABASE_URL':'','CARWISE_SUPABASE_KEY':'','ConnectionStrings__CarWise':'','CarWise__DemoMode':'false','CARWISE_IGNORE_SAVED_CONNECTION':'false','CARWISE_SERVER_SETTINGS_PATH':str(settings)})

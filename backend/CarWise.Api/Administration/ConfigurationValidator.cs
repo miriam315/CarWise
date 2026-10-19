@@ -77,7 +77,16 @@ public sealed class ConfigurationValidator(ReferenceData officialSource)
             var data=ReferenceData.FromSnapshot(new(rules.DeepClone(),config.Cars,config.Employees,config.Occupations,(selectedOfficial??officialSource.Official).Values.ToList()));
             var engine=new PayrollEngine(data);var employees=data.Employees.Select(engine.Validate).ToList();
             if(new[]{config.Ai.ExtractionPrompt,config.Ai.NarrationPrompt,config.Ai.PayslipPrompt}.Any(p=>p is null||p.Length>12000))Fail("פרומפט מוגבל ל־12,000 תווים");
-            ValidateAi(config.Ai.Extraction);ValidateAi(config.Ai.Narration);
+            if(config.Ai.Models is null||config.Ai.Models.Count>20||config.Ai.ServiceModels is null)Fail("קטלוג מודלים לא תקין; עד 20 מודלים");
+            if(config.Ai.Models!.Count>0)
+            {
+                Unique(config.Ai.Models.Select(m=>m.Id),"מודלי AI");
+                foreach(var model in config.Ai.Models)
+                    if(!Regex.IsMatch(model.Id,@"^[a-z0-9-]{1,50}$")||string.IsNullOrWhiteSpace(model.Name)||model.Name.Length>100)Fail("שם או מזהה מודל לא תקין");
+                if(config.Ai.ServiceModels!.Count!=3||new[]{"extraction","narration","payslip"}.Any(service=>!config.Ai.ServiceModels.TryGetValue(service,out var id)||!config.Ai.Models.Any(m=>m.Id==id)))Fail("יש לבחור מודל קיים לכל שירות AI");
+                if(config.Ai.PayslipEnabled&&!config.Ai.ProfileFor("payslip").SupportsDocuments)Fail("לחילוץ תלושים יש לבחור מודל המסומן כתומך PDF ותמונות");
+            }
+            foreach(var model in config.Ai.RegisteredModels())ValidateAi(model.Profile);
             if(config.Ai.Pricing is null || config.Ai.Pricing.Count>200 || config.Ai.ExchangeRateUpdateHourUtc is <0 or >23)Fail("הגדרות תמחור או שעת עדכון אינן תקינות");
             var priceKeys=new HashSet<string>();
             foreach(var price in config.Ai.Pricing!)
@@ -105,7 +114,12 @@ public sealed class ConfigurationValidator(ReferenceData officialSource)
         var custom=(Environment.GetEnvironmentVariable("CARWISE_AI_ALLOWED_HOSTS")??"").Split(',',StringSplitOptions.RemoveEmptyEntries|StringSplitOptions.TrimEntries);
         var customAllowed=profile.Provider=="compatible"&&custom.Contains(uri!.Host,StringComparer.OrdinalIgnoreCase)&&Uri.CheckHostName(uri.Host)==UriHostNameType.Dns&&!uri.IsLoopback;
         if(!customAllowed&&!allowed[profile.Provider].Contains(uri!.Host,StringComparer.OrdinalIgnoreCase))Fail("הדומיין אינו ברשימת ספקי ה־AI המותרים. אין לשלוח מפתחות לכתובת שרירותית");
-        if(!Regex.IsMatch(profile.KeyReference,@"^(environment:CARWISE_AI_[A-Z0-9_]+|vault:[a-f0-9]{32})$"))Fail("הפניה למפתח אינה תקינה");
+        if(profile.BackupKeys is null||profile.BackupKeys.Count>7||profile.BackupKeys.Any(k=>k is null))Fail("ניתן להגדיר עד שבעה מפתחות גיבוי בנוסף לראשי");
+        if(profile.BackupKeys!.Select(k=>k.Id).Distinct().Count()!=profile.BackupKeys!.Count)Fail("מזהי מפתחות כפולים");
+        foreach(var key in profile.BackupKeys!)
+            if(key.Id is null||!Regex.IsMatch(key.Id,@"^[a-f0-9]{16}$")||string.IsNullOrWhiteSpace(key.Name)||key.Name.Length>80||key.Name.Any(char.IsControl))Fail("שם או מזהה מפתח גיבוי לא תקין");
+        foreach(var key in profile.Keys())
+            if(key.KeyReference is null||!Regex.IsMatch(key.KeyReference,@"^(environment:CARWISE_AI_[A-Z0-9_]+|vault:[a-f0-9]{32})$"))Fail("הפניה למפתח אינה תקינה");
     }
     private static decimal Range(JsonNode? value,decimal min,decimal max,string name)
     {var number=value?.GetValue<decimal>()??throw new ArgumentException("חסר שדה: "+name);if(number<min||number>max)Fail(name+" מחוץ לטווח");return number;}

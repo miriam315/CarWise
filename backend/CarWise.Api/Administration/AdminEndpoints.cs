@@ -36,15 +36,22 @@ public static class AdminEndpoints
                 server="ASP.NET Core 10",demoMode=demo,keyStorage="ASP.NET Data Protection",revision=settings.State.Current.Document.Revision,
                 note="כתובת Supabase ומפתח השרת נשמרים דרך הניהול; הרשאות הרשת מוגדרות בתשתית האירוח."};
         });
-        group.MapPost("/test-ai",async(TestAiRequest request,SecretVault vault,IHttpClientFactory clients,UsageAccounting accounting,CancellationToken ct)=>{
+        group.MapPost("/test-ai",async(TestAiRequest request,SecretVault vault,IHttpClientFactory clients,UsageAccounting accounting,AiKeyHealth health,CancellationToken ct)=>{
             ConfigurationValidator.ValidateAi(request.Profile);
             if(request.ApiKey is {Length:>8192})throw new ArgumentException("המפתח ארוך מדי");
             try
             {
-                var client=new ConfiguredCompletionClient(request.Profile,vault,clients,string.IsNullOrWhiteSpace(request.ApiKey)?null:request.ApiKey.Trim(),accounting);
+                var profile=request.Profile;
+                AiBackupKey? selected=null;
+                if(request.KeyId is not null)
+                {
+                    selected=profile.Keys().SingleOrDefault(k=>k.Id==request.KeyId)??throw new ArgumentException("מזהה מפתח אינו קיים");
+                }
+                var client=new ConfiguredCompletionClient(profile,vault,clients,string.IsNullOrWhiteSpace(request.ApiKey)?null:request.ApiKey.Trim(),accounting,request.KeyId is null?health:new AiKeyHealth(),selected);
                 var schema=System.Text.Json.Nodes.JsonNode.Parse("""{"type":"object","additionalProperties":false,"properties":{"ok":{"type":"boolean"}},"required":["ok"]}""")!;
                 var response=await client.CompleteAsync("connection_test",schema,"Return exactly a JSON object with ok=true. Do not include personal data.","בדיקת חיבור",ct);
                 var valid=System.Text.Json.Nodes.JsonNode.Parse(response)?["ok"]?.GetValue<bool>()==true;
+                if(valid&&selected is not null&&string.IsNullOrWhiteSpace(request.ApiKey))health.Success(request.Profile,selected.KeyReference);
                 return Results.Ok(new{success=valid,code=valid?"ok":"invalid_output",message=valid?"הספק החזיר תשובה מובנית תקינה":"הספק לא החזיר את המבנה הנדרש"});
             }
             catch(AiProviderException error){return Results.Ok(new{success=false,code=error.Code,status=error.Status,message=error.Message});}

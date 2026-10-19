@@ -104,6 +104,7 @@ builder.Services.AddScoped(sp=>sp.GetRequiredService<ConfigurationState>().Curre
 builder.Services.AddScoped(sp=>sp.GetRequiredService<ConfigurationSnapshot>().Data);
 builder.Services.AddScoped<PayrollEngine>();
 builder.Services.AddSingleton(repository);builder.Services.AddSingleton(database);
+builder.Services.AddSingleton<AiKeyHealth>();
 builder.Services.AddSingleton<SecretVault>();builder.Services.AddSingleton<ConfigurationService>();
 builder.Services.AddHostedService<ConfigurationRefreshWorker>();
 builder.Services.AddSingleton<ExchangeRates>();builder.Services.AddSingleton<UsageReports>();
@@ -113,11 +114,11 @@ builder.Services.AddHostedService<ExchangeRateWorker>();
 builder.Services.AddHttpClient("AiProviders").ConfigurePrimaryHttpMessageHandler(()=>new SocketsHttpHandler{AllowAutoRedirect=false,UseCookies=false});
 builder.Services.AddScoped<IDataExtractionService>(sp=>{
     var ai=sp.GetRequiredService<ConfigurationSnapshot>().Document.Configuration.Ai;
-    return ai.Enabled?new AiExtractionService(new ConfiguredCompletionClient(ai.Extraction,sp.GetRequiredService<SecretVault>(),sp.GetRequiredService<IHttpClientFactory>(),accounting:sp.GetRequiredService<UsageAccounting>()),ai.ExtractionPrompt):new LocalExtractionService();
+    return ai.Enabled?new AiExtractionService(new ConfiguredCompletionClient(ai.ProfileFor("extraction"),sp.GetRequiredService<SecretVault>(),sp.GetRequiredService<IHttpClientFactory>(),accounting:sp.GetRequiredService<UsageAccounting>(),health:sp.GetRequiredService<AiKeyHealth>()),ai.ExtractionPrompt):new LocalExtractionService();
 });
 builder.Services.AddScoped<IResponseNarrationService>(sp=>{
     var ai=sp.GetRequiredService<ConfigurationSnapshot>().Document.Configuration.Ai;
-    return ai.Enabled?new AiNarrationService(new ConfiguredCompletionClient(ai.Narration,sp.GetRequiredService<SecretVault>(),sp.GetRequiredService<IHttpClientFactory>(),accounting:sp.GetRequiredService<UsageAccounting>()),sp.GetRequiredService<ILogger<AiNarrationService>>(),ai.NarrationPrompt):new TemplateNarrationService();
+    return ai.Enabled?new AiNarrationService(new ConfiguredCompletionClient(ai.ProfileFor("narration"),sp.GetRequiredService<SecretVault>(),sp.GetRequiredService<IHttpClientFactory>(),accounting:sp.GetRequiredService<UsageAccounting>(),health:sp.GetRequiredService<AiKeyHealth>()),sp.GetRequiredService<ILogger<AiNarrationService>>(),ai.NarrationPrompt):new TemplateNarrationService();
 });
 builder.Services.AddSingleton(new AccessControl(SupabaseClient(),demo));
 builder.Services.AddSingleton(new AuthAccounts(SupabaseClient(),database,state));

@@ -21,7 +21,10 @@ def check(base,query,settings,service_token):
   assert query('/runtime')['instanceId']!=old and query('/runtime')['authenticationRequired']
   assert settings.exists() and service_token not in settings.read_text()
   page.get_by_label('דוא״ל להתחברות',exact=True).fill('admin@example.test');page.get_by_label('סיסמה להתחברות',exact=True).fill('TEST-ONLY-ADMIN-PASSWORD-123');page.get_by_label('אימות סיסמת מנהל',exact=True).fill('TEST-ONLY-ADMIN-PASSWORD-123');page.get_by_role('button',name='יצירת מנהל וכניסה',exact=True).click()
-  page.wait_for_selector('.admin-page');admin=page.evaluate("sessionStorage.getItem('carwise-access-token')")
+  try:page.wait_for_selector('.admin-page')
+  except Exception:
+   print('Auth screen diagnostics:',page.locator('.error-banner').all_text_contents(),page.locator('h1,h2').all_text_contents(),errors);raise
+  admin=page.evaluate("sessionStorage.getItem('carwise-access-token')")
   page.get_by_role('tab',name='חשבונות והרשאות',exact=True).click();page.get_by_label('דוא״ל לחשבון חדש').fill('employee@example.test');page.get_by_label('סיסמה לחשבון חדש').fill('TEST-ONLY-EMPLOYEE-PASSWORD-123');page.get_by_label('פרופיל לחשבון חדש').select_option('E-001');page.get_by_role('button',name='יצירת חשבון',exact=True).click();expect(page.locator('.admin-success')).to_contain_text('החשבון נוצר')
   accounts=authorized('/admin/accounts',admin)['items'];worker=next(u for u in accounts if u['email']=='employee@example.test')
   authorized('/admin/accounts/'+worker['id']+'/password',admin,{'password':'TEST-ONLY-NEW-PASSWORD-123'})
@@ -43,7 +46,7 @@ def check(base,query,settings,service_token):
    except Exception:pass
    time.sleep(.15)
   else:raise AssertionError('Server did not restart from its saved connection')
-  page.reload()
+  expect(page.get_by_role('tab',name='סקירה',exact=True)).to_have_attribute('aria-selected','true',timeout=90000)
   page.wait_for_selector('.admin-page');assert service_token not in settings.read_text()
   page.get_by_role('tab',name='חיבור Supabase',exact=True).click();page.screenshot(path=str(screenshots/'saved-connection.png'),full_page=True)
   denied('/setup/admin',admin,403,{'email':'other@example.test','password':'TEST-ONLY-OTHER-PASSWORD','role':'admin','employeeId':None})

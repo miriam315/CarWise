@@ -12,14 +12,31 @@ public sealed record AiProfile
     public string Model {get;init;}="gpt-4.1-mini";
     public string BaseUrl {get;init;}="https://api.openai.com/v1/";
     public string KeyReference {get;init;}="environment:CARWISE_AI_API_KEY";
+    public bool SupportsDocuments {get;init;}=false;
+    public bool PrimaryKeyEnabled {get;init;}=true;
+    public List<AiBackupKey> BackupKeys {get;init;}=[];
+    public IEnumerable<AiBackupKey> Keys()=>new[]{new AiBackupKey("primary","מפתח ראשי",KeyReference,PrimaryKeyEnabled)}.Concat(BackupKeys);
     public int MaxOutputTokens {get;init;}=1200;
     public int TimeoutSeconds {get;init;}=35;
 }
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+public sealed record AiBackupKey(string Id,string Name,string KeyReference,bool Enabled=true);
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record AiModelPrice(string Provider,string Host,string Model,decimal InputUsdPerMillion,
     decimal CachedInputUsdPerMillion,decimal OutputUsdPerMillion,decimal? CacheWriteUsdPerMillion,string Source);
+public sealed record AiRegisteredModel(string Id,string Name,AiProfile Profile);
 public sealed record AiConfiguration(bool Enabled,AiProfile Extraction,AiProfile Narration)
 {
+    public List<AiRegisteredModel> Models {get;init;}=[];
+    public Dictionary<string,string> ServiceModels {get;init;}=[];
+    public AiProfile ProfileFor(string service)=>Models.Count==0?(service=="narration"?Narration:Extraction):
+        Models.Single(m=>m.Id==ServiceModels[service]).Profile;
+    public IEnumerable<AiRegisteredModel> RegisteredModels()=>Models.Count==0?
+        [new("extraction","הבנת השיחה",Extraction),new("narration","ניסוח תשובה",Narration)]:Models;
+    public AiConfiguration WithProfile(string id,AiProfile profile)=>Models.Count==0?
+        id=="extraction"?this with{Extraction=profile}:this with{Narration=profile}:
+        this with{Models=Models.Select(m=>m.Id==id?m with{Profile=profile}:m).ToList()};
+    public string ModelIdFor(string service)=>Models.Count==0?(service=="narration"?"narration":"extraction"):ServiceModels[service];
     public string ExtractionPrompt {get;init;}="חלץ רק נתונים שנמסרו במפורש. אל תסיק נתונים חסרים.";
     public string NarrationPrompt {get;init;}="כתוב בעברית ברורה, חמה וקצרה, והסבר לעובד את החלופה.";
     public string PayslipPrompt {get;init;}="חלץ רכיבי שכר חודשיים בלבד. הבחֵן בין שכר בסיס לברוטו ובין הפרשת עובד להפרשת מעסיק. אל תסיק אחוזים מסכומי ניכוי.";
@@ -38,9 +55,9 @@ public sealed record ConfigurationVersion(long Revision,DateTimeOffset SavedAt,s
 public sealed record ConfigurationDocument(long Revision,DateTimeOffset SavedAt,string Actor,string Note,
     ManagedConfiguration Configuration,List<ConfigurationVersion> History);
 public sealed record SaveConfigurationRequest(long ExpectedRevision,ManagedConfiguration Configuration,string Note,
-    Dictionary<string,string>? ApiKeys=null);
+    Dictionary<string,string>? ApiKeys=null,Dictionary<string,Dictionary<string,string>>? BackupApiKeys=null);
 public sealed record RestoreConfigurationRequest(long ExpectedRevision,long Revision,string Note);
-public sealed record TestAiRequest(AiProfile Profile,string? ApiKey=null);
+public sealed record TestAiRequest(AiProfile Profile,string? ApiKey=null,string? KeyId=null);
 public sealed record ConfigurationSnapshot(ConfigurationDocument Document,ReferenceData Data);
 public sealed class ConfigurationConflictException : Exception;
 public sealed class ConfigurationState(ConfigurationSnapshot initial)

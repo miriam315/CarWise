@@ -36,17 +36,23 @@ public sealed record TokenUsage(long Input,long CachedInput,long CacheWrite,long
 }
 public sealed record AiUsageRecord(string Id,DateTimeOffset StartedAt,DateTimeOffset? CompletedAt,string? ConversationId,string ActionId,
     string Operation,string Provider,string Host,string Model,long ConfigurationRevision,AiModelPrice? Pricing,ExchangeRate? ExchangeRate,
-    string Status,TokenUsage? Tokens,decimal? EstimatedUsd,decimal? EstimatedIls,string? ErrorCode);
+    string Status,TokenUsage? Tokens,decimal? EstimatedUsd,decimal? EstimatedIls,string? ErrorCode)
+{
+    public string CredentialId {get;init;}="primary";
+    public string CredentialName {get;init;}="מפתח ראשי";
+    public int Attempt {get;init;}=1;
+    public string? InvocationId {get;init;}
+}
 public sealed class UsageAccounting(IJsonDatabase database,ConfigurationSnapshot snapshot,ExchangeRates rates,AiOperationContext context,
     ILogger<UsageAccounting> logger)
 {
-    public async Task<AiUsageRecord> StartAsync(AiProfile profile,string operation,CancellationToken ct)
+    public async Task<AiUsageRecord> StartAsync(AiProfile profile,string operation,CancellationToken ct,string credentialId="primary",string credentialName="מפתח ראשי",int attempt=1,string? invocationId=null)
     {
         var host=new Uri(profile.BaseUrl).Host;
         var price=snapshot.Document.Configuration.Ai.Pricing.SingleOrDefault(p=>p.Provider==profile.Provider&&p.Host==host&&p.Model==profile.Model);
         var record=new AiUsageRecord("usage:"+DateTimeOffset.UtcNow.ToString("yyyyMMddHHmmssfffffff")+":"+Guid.NewGuid().ToString("N"),
             DateTimeOffset.UtcNow,null,context.ConversationId,context.ActionId,operation,profile.Provider,host,profile.Model,snapshot.Document.Revision,
-            price,rates.Current,"pending",null,null,null,null);
+            price,rates.Current,"pending",null,null,null,null){CredentialId=credentialId,CredentialName=credentialName,Attempt=attempt,InvocationId=invocationId};
         // Reserve durably before contacting a paid API. A crash leaves an explicit unknown/pending record.
         await StoreAsync(record,ct);return record;
     }
