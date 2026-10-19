@@ -3,17 +3,23 @@ using CarWise.Api.Domain;
 using CarWise.Api.Infrastructure;
 namespace CarWise.Api.Administration;
 
-public sealed class ConfigurationService(IJsonDatabase database,ConfigurationState state,ConfigurationValidator validator,SecretVault vault)
+public sealed class ConfigurationService(IJsonDatabase database,ConfigurationState state,ConfigurationValidator validator,SecretVault vault,OfficialVersions? versions=null)
 {
     private readonly SemaphoreSlim gate=new(1,1);
     public ConfigurationState State=>state;
+    private Task<IReadOnlyDictionary<string,OfficialRecord>?> OfficialAsync(ManagedConfiguration config,CancellationToken ct)
+    {
+        if(config.OfficialVersionId=="baseline"&&versions is null)return Task.FromResult<IReadOnlyDictionary<string,OfficialRecord>?>(null);
+        return Load();
+        async Task<IReadOnlyDictionary<string,OfficialRecord>?> Load()=>await (versions??throw new ArgumentException("גרסאות מאגר אינן זמינות")).LoadAsync(config.OfficialVersionId,ct);
+    }
     public async Task RefreshAsync(CancellationToken ct)
     {
         var rows=await database.ReadAsync("carwise_rules",new Dictionary<string,string>{{"id","admin-active"}},ct:ct);
         if(rows.Count==0)return;
         var document=JsonDefaults.Read<ConfigurationDocument>(rows[0]!["document"]!.ToJsonString());
         if(document.Revision<=state.Current.Document.Revision)return;
-        var data=validator.Validate(document.Configuration);
+        var data=validator.Validate(document.Configuration,await OfficialAsync(document.Configuration,ct));
         document=document with{Configuration=document.Configuration with{Employees=data.Employees}};
         state.Publish(new(document,data));
     }
@@ -34,7 +40,7 @@ public sealed class ConfigurationService(IJsonDatabase database,ConfigurationSta
             if(string.IsNullOrWhiteSpace(request.Note)||request.Note.Length>500)throw new ArgumentException("יש לציין סיבת שינוי עד 500 תווים");
             if(request.Configuration is null)throw new ArgumentException("חסרות הגדרות");
             var config=JsonDefaults.Read<ManagedConfiguration>(JsonDefaults.Serialize(request.Configuration));
-            _=validator.Validate(config);
+            _=validator.Validate(config,await OfficialAsync(config,ct));
             if(request.ApiKeys is not null)
             {
                 if(request.ApiKeys.Keys.Any(k=>k is not ("extraction" or "narration")))throw new ArgumentException("סוג מפתח אינו מוכר");
@@ -46,7 +52,7 @@ public sealed class ConfigurationService(IJsonDatabase database,ConfigurationSta
                         config.Ai with{Narration=config.Ai.Narration with{KeyReference=reference}}};
                 }
             }
-            var validated=validator.Validate(config);config=config with{Employees=validated.Employees};
+            var validated=validator.Validate(config,await OfficialAsync(config,ct));config=config with{Employees=validated.Employees};
             if(config.Ai.Enabled && (!await vault.IsAvailableAsync(config.Ai.Extraction.KeyReference,ct,new Uri(config.Ai.Extraction.BaseUrl).Host)||!await vault.IsAvailableAsync(config.Ai.Narration.KeyReference,ct,new Uri(config.Ai.Narration.BaseUrl).Host)))
                 throw new ArgumentException("הפעלת AI דורשת מפתח זמין לכל אחד משני שלבי השיחה");
             var history=new List<ConfigurationVersion>{new(current.Revision,current.SavedAt,current.Actor,current.Note,current.Configuration)};

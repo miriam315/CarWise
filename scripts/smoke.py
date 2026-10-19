@@ -7,6 +7,8 @@ BASE='http://127.0.0.1:8001'
 def request(path,body=None):
  data=None if body is None else json.dumps(body).encode()
  with urllib.request.urlopen(urllib.request.Request(BASE+'/api'+path,data=data,headers={'Content-Type':'application/json'})) as r:return json.load(r)
+def upload_api(path,content):
+ with urllib.request.urlopen(urllib.request.Request(BASE+'/api'+path,data=content,headers={'Content-Type':'application/octet-stream'}),timeout=20) as response:return json.load(response)
 def start(state):
  process=subprocess.Popen(['node','scripts/dotnet.mjs','run','--project','backend/CarWise.Api','--no-launch-profile','--no-build'],cwd=ROOT,
   env={**os.environ,'ASPNETCORE_ENVIRONMENT':'Development','ASPNETCORE_URLS':BASE,'ConnectionStrings__CarWise':state,'SUPABASE_URL':'','CARWISE_SUPABASE_KEY':'','CARWISE_AI_API_KEY':''},
@@ -34,7 +36,7 @@ with tempfile.TemporaryDirectory(prefix='carwise-smoke-') as temp:
  process=start(connection)
  try:
   from importlib.machinery import SourceFileLoader
-  admin_revision=SourceFileLoader('admin_checks',str(ROOT/'scripts/admin-checks.py')).load_module().check_admin(request,dbname)
+  admin_revision=SourceFileLoader('admin_checks',str(ROOT/'scripts/admin-checks.py')).load_module().check_admin(request,dbname,upload_api)
   data=request('/data');assert data['officialCount']==77988
   employee=data['employees'][0]
   runtime=request('/runtime');assert runtime['server']=='ASP.NET Core 10' and runtime['database']=='PostgreSQL'
@@ -126,7 +128,7 @@ with tempfile.TemporaryDirectory(prefix='carwise-smoke-') as temp:
    page.get_by_label('בחירת עובד לדוגמה').select_option('E-001')
    page.wait_for_timeout(400)
    nav('ניהול המערכת');page.wait_for_selector('.admin-page')
-   for label in ['ספקי AI','עלויות AI ושער דולר','מדיניות רכב','מס והפרשות','קטלוג רכבים','עיסוקים','עובדים','היסטוריה','סקירה']:
+   for label in ['ספקי AI','מאגר רשות המסים','פרומפטים ותלושים','עלויות AI ושער דולר','מדיניות רכב','מס והפרשות','קטלוג רכבים','עיסוקים','עובדים','היסטוריה','סקירה']:
     page.get_by_role('tab',name=label,exact=True).click()
     assert not page.evaluate('document.documentElement.scrollWidth > innerWidth')
    page.screenshot(path=str(screenshots/'admin-desktop.png'),full_page=True)
@@ -145,6 +147,50 @@ with tempfile.TemporaryDirectory(prefix='carwise-smoke-') as temp:
    saved=request('/admin/configuration')
    reverted=request('/admin/restore',{'expectedRevision':saved['revision'],'revision':admin_revision,'note':'restore after browser pricing test'})
    admin_revision=reverted['revision']
+   page.reload();page.wait_for_selector('.vehicle-card');nav('ניהול המערכת')
+   page.get_by_role('tab',name='פרומפטים ותלושים',exact=True).click()
+   page.get_by_label('הנחיות לניסוח התשובה',exact=True).fill('TEST: use concise Hebrew wording')
+   page.get_by_label('סיבת שינוי הגדרות').fill('browser managed prompt test')
+   page.get_by_role('button',name='שמירה והפעלה',exact=True).click()
+   expect(page.locator('.admin-success')).to_contain_text('נשמרו והופעלו')
+   prompt_config=request('/admin/configuration');assert prompt_config['configuration']['ai']['narrationPrompt']=='TEST: use concise Hebrew wording'
+   reverted=request('/admin/restore',{'expectedRevision':prompt_config['revision'],'revision':admin_revision,'note':'restore original prompt'})
+   admin_revision=reverted['revision']
+   page.reload();page.wait_for_selector('.vehicle-card');nav('ניהול המערכת')
+   page.get_by_role('tab',name='מאגר רשות המסים',exact=True).click()
+   page.get_by_role('row').filter(has_text='official-2027.csv').get_by_role('button',name='בדיקה לפני הפעלה').click()
+   expect(page.get_by_role('heading',name='תוצאות בדיקה · שנת 2027')).to_be_visible()
+   page.get_by_label('סיבת הפעלת מאגר').fill('browser activation 2027')
+   page.get_by_role('button',name='הפעלת גרסת 2027',exact=True).click()
+   expect(page.locator('.admin-success')).to_contain_text('הופעלה')
+   assert request('/data')['rules']['valueOfUse']['taxYear']==2027
+   page.get_by_role('row').filter(has_text='מאגר מקורי').get_by_role('button',name='בדיקה לפני הפעלה').click()
+   page.get_by_label('סיבת הפעלת מאגר').fill('browser rollback baseline')
+   page.get_by_role('button',name='הפעלת גרסת 2026',exact=True).click()
+   expect(page.locator('.admin-success')).to_contain_text('הופעלה')
+   admin_revision=request('/admin/configuration')['revision']
+   page.screenshot(path=str(screenshots/'official-versions.png'),full_page=True)
+   # A synthetic provider response tests employee review without sending any real document or paid request.
+   def mock_data(route):
+    response=route.fetch();body=response.json();body['payslipEnabled']=True;route.fulfill(response=response,json=body)
+   page.route('**/api/data',mock_data)
+   fields={key:{'value':None,'evidence':None} for key in ['salary','commission','bonus','pension','fund','credits','participation']}
+   fields['salary']={'value':19000,'evidence':'שכר בסיס 19,000'};fields['pension']={'value':6,'evidence':'פנסיית עובד 6%'}
+   page.route('**/api/payslip/extract?*',lambda route:route.fulfill(json={'fields':fields,'warnings':['Synthetic test response; employee review required.'],'configurationRevision':admin_revision}))
+   page.reload();page.wait_for_selector('.vehicle-card');nav('הנתונים שלי')
+   before_salary=page.get_by_label('שכר בסיס חודשי (₪)',exact=True).input_value()
+   page.get_by_label('העלאת תלוש שכר').set_input_files({'name':'fictional-test-payslip.pdf','mimeType':'application/pdf','buffer':b'%PDF-1.7 FAKE TEST DOCUMENT ONLY'})
+   expect(page.get_by_role('button',name='חילוץ נתונים מהתלוש',exact=True)).to_be_disabled()
+   page.locator('.payslip-consent input').check();page.get_by_role('button',name='חילוץ נתונים מהתלוש',exact=True).click()
+   expect(page.get_by_label('חילוץ שכר בסיס חודשי (₪)',exact=True)).to_have_value('19000')
+   expect(page.get_by_label('שכר בסיס חודשי (₪)',exact=True)).to_have_value(before_salary)
+   page.screenshot(path=str(screenshots/'payslip-review.png'),full_page=True)
+   page.get_by_role('button',name='אישור והעברת השדות המסומנים לטופס').click()
+   expect(page.get_by_label('שכר בסיס חודשי (₪)',exact=True)).to_have_value('19000')
+   page.get_by_role('button',name='שמירה וחישוב מחדש',exact=True).click();page.wait_for_selector('.vehicle-card')
+   assert request('/conversation/E-001')['employee']['salary']==19000
+   nav('הנתונים שלי');page.get_by_role('button',name='איפוס לדוגמה').click();page.get_by_role('button',name='שמירה וחישוב מחדש').click();page.wait_for_selector('.vehicle-card')
+   page.unroute('**/api/data',mock_data);page.unroute('**/api/payslip/extract?*')
    nav('הסקירה שלי')
    page.set_viewport_size({'width':390,'height':844});page.wait_for_timeout(350);page.screenshot(path=str(screenshots/'mobile.png'),full_page=True)
    assert not page.evaluate('document.documentElement.scrollWidth > innerWidth')

@@ -13,6 +13,8 @@ run=lambda args,**kw:subprocess.run(args,cwd=ROOT,check=True,**kw)
 def query(path,body=None):
  data=None if body is None else json.dumps(body).encode()
  with urllib.request.urlopen(urllib.request.Request(base+'/api'+path,data=data,headers={'Content-Type':'application/json'}),timeout=10) as response:return json.load(response)
+def upload_api(path,content):
+ with urllib.request.urlopen(urllib.request.Request(base+'/api'+path,data=content,headers={'Content-Type':'application/octet-stream'}),timeout=20) as response:return json.load(response)
 def token(role,key):
  enc=lambda value:base64.urlsafe_b64encode(json.dumps(value,separators=(',',':')).encode()).decode().rstrip('=')
  unsigned=enc({'alg':'HS256','typ':'JWT'})+'.'+enc({'role':role,'exp':int(time.time())+1800})
@@ -84,7 +86,7 @@ try:
    else:raise RuntimeError('Supabase adapter startup timed out')
    assert query('/runtime')['database']=='Supabase/PostgreSQL'
    from importlib.machinery import SourceFileLoader
-   SourceFileLoader('admin_checks',str(ROOT/'scripts/admin-checks.py')).load_module().check_admin(query,name)
+   SourceFileLoader('admin_checks',str(ROOT/'scripts/admin-checks.py')).load_module().check_admin(query,name,upload_api)
    data=query('/data');assert data['officialCount']==77988
    e=data['employees'][0];r=query('/simulate',{'employee':e});a=next(r for r in r['results'] if r['id']=='CAR-10');assert round(a['net'])==11693
    ticket=query('/tickets',{'employee':e,'target':'CAR-10','question':'בדיקת ההשתתפות דרך Supabase adapter'})

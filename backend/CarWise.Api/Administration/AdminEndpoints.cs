@@ -47,10 +47,31 @@ public static class AdminEndpoints
         group.MapGet("/exchange-rate",(ExchangeRates rates)=>rates.View());
         group.MapPost("/exchange-rate/refresh",async(ExchangeRates rates,CancellationToken ct)=>{await rates.RefreshAsync(ct);return rates.View();})
             .WithMetadata(new Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute("login"));
-        group.MapGet("/official",(string? q,int? page,ReferenceData source)=>{
+        group.MapGet("/official/versions",async(OfficialVersions versions,ConfigurationService settings,CancellationToken ct)=>{
+            await settings.RefreshAsync(ct);return new{activeVersionId=settings.State.Current.Document.Configuration.OfficialVersionId,items=await versions.ListAsync(ct)};
+        });
+        group.MapPost("/official/upload",async(HttpContext context,OfficialVersions versions,CancellationToken ct)=>{
+            var bytes=await UploadReader.ReadAsync(context,OfficialVersions.MaxBytes,ct);
+            return await versions.UploadAsync(bytes,context.Request.Query["fileName"].ToString(),Actor(context),ct);
+        }).WithMetadata(new Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute("documents"));
+        group.MapGet("/official/versions/{id}/preview",async(string id,OfficialVersions versions,ConfigurationService settings,CancellationToken ct)=>{
+            await settings.RefreshAsync(ct);return (await versions.PreviewAsync(id,settings.State.Current.Document.Configuration,ct)).Preview;
+        });
+        group.MapPost("/official/preview",async(OfficialPreviewRequest request,OfficialVersions versions,ConfigurationService settings,CancellationToken ct)=>{
+            await settings.RefreshAsync(ct);return (await versions.PreviewAsync(request.VersionId,settings.State.Current.Document.Configuration,ct,request.Replacements)).Preview;
+        });
+        group.MapPost("/official/activate",async(ActivateOfficialRequest request,OfficialVersions versions,ConfigurationService settings,HttpContext context,CancellationToken ct)=>{
+            await settings.RefreshAsync(ct);
+            if(settings.State.Current.Document.Revision!=request.ExpectedRevision)throw new ConfigurationConflictException();
+            var (configuration,preview)=await versions.PreviewAsync(request.VersionId,settings.State.Current.Document.Configuration,ct,request.Replacements);
+            if(preview.Missing.Count>0)throw new ArgumentException("לא ניתן להפעיל מאגר: חסרות התאמות לרכבי הקטלוג. עדכנו את הקטלוג או העלו קובץ מלא.");
+            await settings.SaveAsync(new(request.ExpectedRevision,configuration,request.Note),Actor(context),ct);return await settings.ViewAsync(ct);
+        });
+        group.MapGet("/official",async(string? q,int? page,string? version,ReferenceData source,OfficialVersions versions,CancellationToken ct)=>{
+            var official=version is null?source.Official:await versions.LoadAsync(version,ct);var taxYear=official.Values.First().TaxYear;
             var query=(q??"").Trim();if(query.Length>100)throw new ArgumentException("החיפוש ארוך מדי");
             var number=page??0;if(number<0||number>10000)throw new ArgumentException("עמוד לא תקין");
-            var rows=source.Official.Values.Where(r=>r.TaxYear==source.TaxYear && r.VehicleType=="1" &&
+            var rows=official.Values.Where(r=>r.TaxYear==taxYear && r.VehicleType=="1" &&
                 (query.Length==0||r.Key.Contains(query,StringComparison.OrdinalIgnoreCase)||r.Document.GetValueOrDefault("כינוי מסחרי","").Contains(query,StringComparison.OrdinalIgnoreCase)||r.Document.GetValueOrDefault("תוצר","").Contains(query,StringComparison.OrdinalIgnoreCase)))
                 .OrderByDescending(r=>r.RegistrationYear).ThenBy(r=>r.MakerCode).ThenBy(r=>r.ModelCode).ToList();
             return new{total=rows.Count,page=number,items=rows.Skip(number*20).Take(20).Select(r=>new{r.TaxYear,year=r.RegistrationYear,r.MakerCode,r.ModelCode,model=r.Document.GetValueOrDefault("כינוי מסחרי",""),brand=r.Document.GetValueOrDefault("תוצר",""),description=r.Document.GetValueOrDefault("תאור דגם",""),value=r.Value,drive=source.Rules["valueOfUse"]!["driveField"]![r.Drive]!.GetValue<string>(),price=decimal.Parse(r.Document["מחיר מחירון"],System.Globalization.CultureInfo.InvariantCulture)})};

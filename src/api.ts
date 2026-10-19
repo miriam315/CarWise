@@ -6,3 +6,9 @@ export async function api(path:string,body?:unknown){
  if(!response.ok){if(response.status===401)window.dispatchEvent(new Event('carwise-auth-required'));throw Error(data?.error||'אירעה שגיאה')}
  return data;
 }
+export async function upload(path:string,file:File){
+ const headers:Record<string,string>={'Content-Type':'application/octet-stream'};
+ const token=sessionStorage.getItem('carwise-access-token');if(token)headers.Authorization='Bearer '+token;
+ const response=await fetch('/api'+path,{method:'POST',headers,body:file});
+ const data=await response.json();if(!response.ok){if(response.status===401)window.dispatchEvent(new Event('carwise-auth-required'));throw Error(data?.error||'העלאת הקובץ נכשלה')}return data;
+}

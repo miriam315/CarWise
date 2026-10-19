@@ -27,16 +27,18 @@ public sealed class AiProviderException(int status,string code) : AiUnavailableE
 /// <summary>Native adapters share a provider-independent structured-completion contract.</summary>
 public sealed class ConfiguredCompletionClient(AiProfile profile,SecretVault vault,IHttpClientFactory clients,string? testKey=null,UsageAccounting? accounting=null) : IAiCompletionClient
 {
-    public async Task<string> CompleteAsync(string name,JsonNode schema,string instructions,string text,CancellationToken ct)
+    public Task<string> CompleteAsync(string name,JsonNode schema,string instructions,string text,CancellationToken ct)=>ExecuteAsync(name,schema,instructions,text,null,ct);
+    public Task<string> CompleteDocumentAsync(string name,JsonNode schema,string instructions,AiDocument document,CancellationToken ct)=>ExecuteAsync(name,schema,instructions,"Extract the explicitly printed payroll fields from the attached document.",document,ct);
+    private async Task<string> ExecuteAsync(string name,JsonNode schema,string instructions,string text,AiDocument? document,CancellationToken ct)
     {
         ConfigurationValidator.ValidateAi(profile);
         var record=accounting is null?null:await accounting.StartAsync(profile,name,ct);
         JsonNode? usageBody=null;Exception? failure=null;
-        try{return await SendAsync(name,schema,instructions,text,body=>usageBody=body,ct);}
+        try{return await SendAsync(name,schema,instructions,text,body=>usageBody=body,document,ct);}
         catch(Exception error){failure=error;throw;}
         finally{if(record is not null)await accounting!.FinishAsync(record,usageBody,failure);}
     }
-    private async Task<string> SendAsync(string name,JsonNode schema,string instructions,string text,Action<JsonNode?> observe,CancellationToken ct)
+    private async Task<string> SendAsync(string name,JsonNode schema,string instructions,string text,Action<JsonNode?> observe,AiDocument? document,CancellationToken ct)
     {
         var key=testKey??await vault.ResolveAsync(profile.KeyReference,ct,new Uri(profile.BaseUrl).Host);
         if(string.IsNullOrWhiteSpace(key))throw new AiUnavailableException("לא הוגדר מפתח לספק שנבחר");
@@ -45,21 +47,21 @@ public sealed class ConfiguredCompletionClient(AiProfile profile,SecretVault vau
         if(profile.Provider is "openai" or "compatible")
         {
             client.DefaultRequestHeaders.Authorization=new AuthenticationHeaderValue("Bearer",key);
-            return await new AiGateway(client,profile.Model,profile.MaxOutputTokens,observe).CompleteAsync(name,schema,instructions,text,ct);
+            return await new AiGateway(client,profile.Model,profile.MaxOutputTokens,observe,document).CompleteAsync(name,schema,instructions,text,ct);
         }
         HttpResponseMessage response;
         if(profile.Provider=="anthropic")
         {
             client.DefaultRequestHeaders.Add("x-api-key",key);client.DefaultRequestHeaders.Add("anthropic-version","2023-06-01");
             response=await client.PostAsJsonAsync("messages",new{model=profile.Model,max_tokens=profile.MaxOutputTokens,system=instructions,
-                messages=new[]{new{role="user",content=text}},output_config=new{format=new{type="json_schema",schema}}},ct);
+                messages=new JsonArray(new JsonObject{["role"]="user",["content"]=document is null?JsonValue.Create(text):new JsonArray(new JsonObject{["type"]="text",["text"]=text},document.AnthropicPart())}),output_config=new{format=new{type="json_schema",schema}}},ct);
         }
         else
         {
             client.DefaultRequestHeaders.Add("x-goog-api-key",key);
             var model=profile.Model.StartsWith("models/",StringComparison.Ordinal)?profile.Model[7..]:profile.Model;
             response=await client.PostAsJsonAsync("models/"+Uri.EscapeDataString(model)+":generateContent",new{
-                systemInstruction=new{parts=new[]{new{text=instructions}}},contents=new[]{new{role="user",parts=new[]{new{text}}}},
+                systemInstruction=new{parts=new[]{new{text=instructions}}},contents=new JsonArray(new JsonObject{["role"]="user",["parts"]=document is null?new JsonArray(new JsonObject{["text"]=text}):new JsonArray(new JsonObject{["text"]=text},document.GeminiPart())}),
                 generationConfig=new{responseMimeType="application/json",responseJsonSchema=schema,maxOutputTokens=profile.MaxOutputTokens}},ct);
         }
         using(response)

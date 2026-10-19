@@ -20,7 +20,7 @@ public sealed class Repository(IJsonDatabase db)
         }
         return all;
     }
-    public async Task<bool> HasReferenceDataAsync(CancellationToken ct=default) => (await db.ReadAsync("carwise_rules",limit:1,ct:ct)).Count>0;
+    public async Task<bool> HasReferenceDataAsync(CancellationToken ct=default) => (await db.ReadAsync("carwise_rules",new Dictionary<string,string>{{"id","active"}},limit:1,ct:ct)).Count>0;
     public async Task SeedAsync(ReferenceData data,CancellationToken ct=default)
     {
         async Task Write<T>(string table,IEnumerable<T> values,Func<T,string> key)

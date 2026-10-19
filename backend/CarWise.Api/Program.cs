@@ -1,4 +1,5 @@
 using CarWise.Api.Accounting;
+using Microsoft.AspNetCore.HttpOverrides;
 using CarWise.Api.Administration;
 using Microsoft.AspNetCore.DataProtection;
 using System.Threading.RateLimiting;
@@ -70,6 +71,7 @@ var defaultAi=new AiConfiguration(!string.IsNullOrWhiteSpace(builder.Configurati
 var defaultConfig=new ManagedConfiguration(reference.Rules.DeepClone(),reference.Cars,reference.OccupationDocuments,reference.Employees,defaultAi);
 var initial=new ConfigurationDocument(0,DateTimeOffset.UtcNow,"system","הגדרות ראשוניות",defaultConfig,[]);
 var state=new ConfigurationState(new(initial,reference));
+builder.Services.AddSingleton(new OfficialVersions(database,reference));
 builder.Services.AddSingleton(state);builder.Services.AddSingleton(new ConfigurationValidator(reference));
 builder.Services.AddScoped(sp=>sp.GetRequiredService<ConfigurationState>().Current);
 builder.Services.AddScoped(sp=>sp.GetRequiredService<ConfigurationSnapshot>().Data);
@@ -78,7 +80,8 @@ builder.Services.AddSingleton(repository);builder.Services.AddSingleton(database
 var keyDirectory=Environment.GetEnvironmentVariable("CARWISE_KEYRING_DIR")??Path.Combine(root,".local","admin-keys");
 Directory.CreateDirectory(keyDirectory);
 if(!OperatingSystem.IsWindows())File.SetUnixFileMode(keyDirectory,UnixFileMode.UserRead|UnixFileMode.UserWrite|UnixFileMode.UserExecute);
-builder.Services.AddDataProtection().SetApplicationName("CarWise.Administration").PersistKeysToFileSystem(new DirectoryInfo(keyDirectory));
+var protection=builder.Services.AddDataProtection().SetApplicationName("CarWise.Administration").PersistKeysToFileSystem(new DirectoryInfo(keyDirectory));
+if(OperatingSystem.IsWindows())protection.ProtectKeysWithDpapi();
 builder.Services.AddSingleton<SecretVault>();builder.Services.AddSingleton<ConfigurationService>();
 builder.Services.AddHostedService<ConfigurationRefreshWorker>();
 builder.Services.AddSingleton<ExchangeRates>();builder.Services.AddSingleton<UsageReports>();
@@ -88,19 +91,27 @@ builder.Services.AddHostedService<ExchangeRateWorker>();
 builder.Services.AddHttpClient("AiProviders").ConfigurePrimaryHttpMessageHandler(()=>new SocketsHttpHandler{AllowAutoRedirect=false,UseCookies=false});
 builder.Services.AddScoped<IDataExtractionService>(sp=>{
     var ai=sp.GetRequiredService<ConfigurationSnapshot>().Document.Configuration.Ai;
-    return ai.Enabled?new AiExtractionService(new ConfiguredCompletionClient(ai.Extraction,sp.GetRequiredService<SecretVault>(),sp.GetRequiredService<IHttpClientFactory>(),accounting:sp.GetRequiredService<UsageAccounting>())):new LocalExtractionService();
+    return ai.Enabled?new AiExtractionService(new ConfiguredCompletionClient(ai.Extraction,sp.GetRequiredService<SecretVault>(),sp.GetRequiredService<IHttpClientFactory>(),accounting:sp.GetRequiredService<UsageAccounting>()),ai.ExtractionPrompt):new LocalExtractionService();
 });
 builder.Services.AddScoped<IResponseNarrationService>(sp=>{
     var ai=sp.GetRequiredService<ConfigurationSnapshot>().Document.Configuration.Ai;
-    return ai.Enabled?new AiNarrationService(new ConfiguredCompletionClient(ai.Narration,sp.GetRequiredService<SecretVault>(),sp.GetRequiredService<IHttpClientFactory>(),accounting:sp.GetRequiredService<UsageAccounting>()),sp.GetRequiredService<ILogger<AiNarrationService>>()):new TemplateNarrationService();
+    return ai.Enabled?new AiNarrationService(new ConfiguredCompletionClient(ai.Narration,sp.GetRequiredService<SecretVault>(),sp.GetRequiredService<IHttpClientFactory>(),accounting:sp.GetRequiredService<UsageAccounting>()),sp.GetRequiredService<ILogger<AiNarrationService>>(),ai.NarrationPrompt):new TemplateNarrationService();
 });
 builder.Services.AddSingleton(new AccessControl(SupabaseClient(),demo));
 builder.Services.AddScoped<AdvisorService>();
 builder.Services.AddRateLimiter(options=>{
     options.RejectionStatusCode=429;
+    options.AddPolicy("documents",context=>RateLimitPartition.GetFixedWindowLimiter(context.Items["caller"] is Caller caller?caller.UserId:context.Connection.RemoteIpAddress?.ToString()??"unknown",_=>new FixedWindowRateLimiterOptions{PermitLimit=5,Window=TimeSpan.FromMinutes(1),QueueLimit=0}));
     options.AddPolicy("login",context=>RateLimitPartition.GetFixedWindowLimiter(context.Connection.RemoteIpAddress?.ToString()??"unknown",_=>new FixedWindowRateLimiterOptions{PermitLimit=8,Window=TimeSpan.FromMinutes(1),QueueLimit=0}));
 });
+builder.Services.Configure<ForwardedHeadersOptions>(options=>{
+    options.ForwardedHeaders=ForwardedHeaders.XForwardedFor|ForwardedHeaders.XForwardedProto;
+    foreach(var address in (Environment.GetEnvironmentVariable("CARWISE_TRUSTED_PROXIES")??"").Split(',',StringSplitOptions.RemoveEmptyEntries|StringSplitOptions.TrimEntries))
+        options.KnownProxies.Add(System.Net.IPAddress.TryParse(address,out var ip)?ip:throw new InvalidOperationException("Invalid trusted proxy IP"));
+});
 var app=builder.Build();
+// Trust only the framework's default loopback proxies unless explicitly configured by the host.
+app.UseForwardedHeaders();
 await app.Services.GetRequiredService<ConfigurationService>().RefreshAsync(CancellationToken.None);
 app.UseRateLimiter();
 app.Use(async(context,next)=>
@@ -111,6 +122,7 @@ app.Use(async(context,next)=>
     try
     {
         var path=context.Request.Path.Value??"";
+        if(path.StartsWith("/api/",StringComparison.Ordinal))RequestProtection.Validate(context,builder.Environment.IsDevelopment());
         if(path.StartsWith("/api/") && path is not ("/api/health" or "/api/runtime" or "/api/auth/login"))
             context.Items["caller"]=await app.Services.GetRequiredService<AccessControl>().AuthenticateAsync(context,context.RequestAborted);
         await next(context);
@@ -138,7 +150,7 @@ app.MapGet("/api/runtime",(IDataExtractionService extraction)=>new{server="ASP.N
 app.MapGet("/api/health",async(ReferenceData current,CancellationToken ct)=>
 {
     await repository.HasReferenceDataAsync(ct);
-    return Results.Ok(new{status="ok",records=reference.Official.Count,method=$"C# decimal / monthly {current.Rules["netMethod"]!["taxYear"]}",database=repository.Provider});
+    return Results.Ok(new{status="ok",records=current.Official.Count,method=$"C# decimal / monthly {current.Rules["netMethod"]!["taxYear"]}",database=repository.Provider});
 });
 app.MapPost("/api/auth/login",async(LoginRequest request,AccessControl access,CancellationToken ct)=>
 {
@@ -147,7 +159,7 @@ app.MapPost("/api/auth/login",async(LoginRequest request,AccessControl access,Ca
 }).WithMetadata(new Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute("login"));
 app.MapGet("/api/data",(HttpContext context,ReferenceData reference,AccessControl access)=>new{
     cars=reference.Cars.Select(reference.Enrich),employees=reference.Employees.Where(e=>demo || context.Items["caller"] is Caller c && e.Id==c.EmployeeId),
-    occupations=reference.OccupationDocuments,rules=reference.Rules,officialCount=reference.Official.Count,canAdmin=access.CanAdmin(context),configurationRevision=state.Current.Document.Revision});
+    occupations=reference.OccupationDocuments,rules=reference.Rules,officialCount=reference.Official.Count,canAdmin=access.CanAdmin(context),configurationRevision=state.Current.Document.Revision,payslipEnabled=state.Current.Document.Configuration.Ai.Enabled&&state.Current.Document.Configuration.Ai.PayslipEnabled});
 void AuthorizeEmployee(HttpContext context,AccessControl access,Employee employee)
 {
     access.Employee(context,employee.Id);
@@ -209,6 +221,7 @@ app.MapPost("/api/tickets/{id:guid}",async(Guid id,AnswerRequest request,HttpCon
     await repository.ResolveAsync(id,request.Participation,request.Answer.Trim(),text,ct);return Results.Ok(new{status="resolved"});
 });
 app.MapAdministration(repository.Provider,supabaseUrl,demo);
+app.MapPayslips();
 var dist=Path.Combine(root,"dist");
 if(!Directory.Exists(dist))dist=Path.Combine(AppContext.BaseDirectory,"wwwroot");
 if(Directory.Exists(dist))

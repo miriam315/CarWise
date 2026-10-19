@@ -5,7 +5,7 @@ namespace CarWise.Api.Administration;
 
 public sealed class ConfigurationValidator(ReferenceData officialSource)
 {
-    public ReferenceData Validate(ManagedConfiguration config)
+    public ReferenceData Validate(ManagedConfiguration config,IReadOnlyDictionary<string,OfficialRecord>? selectedOfficial=null)
     {
         try
         {
@@ -53,7 +53,11 @@ public sealed class ConfigurationValidator(ReferenceData officialSource)
             if(maxTax+maxInsurance>=.95m)Fail("סך שיעורי המס והביטוח גבוה מדי לחישוב גילום יציב");
             Range(net["pensionCredit"]!["rate"],0,1,"זיכוי פנסיה");Range(net["pensionCredit"]!["maxContributionRate"],0,1,"תקרת שיעור פנסיה");
             Range(net["pensionCredit"]!["incomeCeiling"],0,1000000,"הכנסה מזכה");
-            if(!JsonNode.DeepEquals(rules["valueOfUse"],officialSource.Rules["valueOfUse"]))Fail("מיפוי המאגר הרשמי אינו ניתן להחלפה באמצעות הגדרות שכר");
+            var mapping=officialSource.Rules["valueOfUse"]!.DeepClone();
+            if(selectedOfficial is not null&&config.OfficialVersionId!="baseline")
+            {var selectedYear=selectedOfficial.Values.First().TaxYear;mapping["taxYear"]=selectedYear;mapping["source"]=mapping["source"]!.GetValue<string>().Replace(officialSource.TaxYear.ToString(),selectedYear.ToString(),StringComparison.Ordinal);}
+            else if(selectedOfficial is null&&config.OfficialVersionId!="baseline")Fail("יש לטעון את גרסת המאגר לפני אימות ההגדרות");
+            if(!JsonNode.DeepEquals(rules["valueOfUse"],mapping))Fail("מיפוי המאגר הרשמי אינו ניתן להחלפה באמצעות הגדרות שכר");
             var family=rules["familyTrack"]!["cars"]!.AsArray().Select(c=>c!.GetValue<string>()).ToHashSet();
             foreach(var id in family)if(!config.Cars.Any(c=>c.Id==id&&c.Group=="משפחתי"))Fail("רכב משפחתי המוגדר בכללים חסר בקטלוג");
             foreach(var car in config.Cars)
@@ -70,8 +74,9 @@ public sealed class ConfigurationValidator(ReferenceData officialSource)
                 var maintenance=document["maintenance"].GetDecimal();if(maintenance<0 || maintenance>30000)Fail("אחזקת רכב מחוץ לטווח");
                 if(!document["waiver"].GetBoolean()&&maintenance!=0)Fail("עיסוק שאינו מאפשר ויתור חייב באחזקה אפס");
             }
-            var data=ReferenceData.FromSnapshot(new(rules.DeepClone(),config.Cars,config.Employees,config.Occupations,officialSource.Official.Values.ToList()));
+            var data=ReferenceData.FromSnapshot(new(rules.DeepClone(),config.Cars,config.Employees,config.Occupations,(selectedOfficial??officialSource.Official).Values.ToList()));
             var engine=new PayrollEngine(data);var employees=data.Employees.Select(engine.Validate).ToList();
+            if(new[]{config.Ai.ExtractionPrompt,config.Ai.NarrationPrompt,config.Ai.PayslipPrompt}.Any(p=>p is null||p.Length>12000))Fail("פרומפט מוגבל ל־12,000 תווים");
             ValidateAi(config.Ai.Extraction);ValidateAi(config.Ai.Narration);
             if(config.Ai.Pricing is null || config.Ai.Pricing.Count>200 || config.Ai.ExchangeRateUpdateHourUtc is <0 or >23)Fail("הגדרות תמחור או שעת עדכון אינן תקינות");
             var priceKeys=new HashSet<string>();
@@ -90,13 +95,16 @@ public sealed class ConfigurationValidator(ReferenceData officialSource)
     }
     public static void ValidateAi(AiProfile profile)
     {
+        if(profile.DisplayName is null||profile.DisplayName.Length>100)Fail("שם ספק ארוך מדי");
         if(profile.Provider is not ("openai" or "compatible" or "anthropic" or "gemini"))Fail("ספק AI לא נתמך");
         if(string.IsNullOrWhiteSpace(profile.Model)||profile.Model.Length>160||!Regex.IsMatch(profile.Model,@"^[A-Za-z0-9_./:@-]+$"))Fail("שם מודל לא תקין");
         if(profile.MaxOutputTokens is <128 or >8192 || profile.TimeoutSeconds is <5 or >90)Fail("מגבלת פלט או זמן המתנה מחוץ לטווח");
         if(!Uri.TryCreate(profile.BaseUrl,UriKind.Absolute,out var uri)||uri.Scheme!="https"||!uri.IsDefaultPort||!string.IsNullOrEmpty(uri.UserInfo)||!string.IsNullOrEmpty(uri.Query)||!string.IsNullOrEmpty(uri.Fragment))Fail("כתובת AI חייבת להיות HTTPS ללא פרטי גישה, פורט או פרמטרים");
         var allowed=new Dictionary<string,string[]>{["openai"]=["api.openai.com"],["anthropic"]=["api.anthropic.com"],["gemini"]=["generativelanguage.googleapis.com"],
             ["compatible"]=["api.openai.com","api.groq.com","api.mistral.ai","openrouter.ai","api.deepseek.com","api.together.xyz","api.fireworks.ai"]};
-        if(!allowed[profile.Provider].Contains(uri!.Host,StringComparer.OrdinalIgnoreCase))Fail("הדומיין אינו ברשימת ספקי ה־AI המותרים. אין לשלוח מפתחות לכתובת שרירותית");
+        var custom=(Environment.GetEnvironmentVariable("CARWISE_AI_ALLOWED_HOSTS")??"").Split(',',StringSplitOptions.RemoveEmptyEntries|StringSplitOptions.TrimEntries);
+        var customAllowed=profile.Provider=="compatible"&&custom.Contains(uri!.Host,StringComparer.OrdinalIgnoreCase)&&Uri.CheckHostName(uri.Host)==UriHostNameType.Dns&&!uri.IsLoopback;
+        if(!customAllowed&&!allowed[profile.Provider].Contains(uri!.Host,StringComparer.OrdinalIgnoreCase))Fail("הדומיין אינו ברשימת ספקי ה־AI המותרים. אין לשלוח מפתחות לכתובת שרירותית");
         if(!Regex.IsMatch(profile.KeyReference,@"^(environment:CARWISE_AI_[A-Z0-9_]+|vault:[a-f0-9]{32})$"))Fail("הפניה למפתח אינה תקינה");
     }
     private static decimal Range(JsonNode? value,decimal min,decimal max,string name)
