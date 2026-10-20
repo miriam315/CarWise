@@ -1,0 +1,124 @@
+{
+  "review_date": "2026-10-20",
+  "review_timezone": "Asia/Jerusalem",
+  "reviewed_commit": "f3d1da62cd24be363a1263b68691df48daa44e49",
+  "scope": "Repository review and isolated synthetic checks; not a production audit or penetration-test certification",
+  "runtime": {
+    "node": "24.19.0",
+    "dotnet_sdk": "10.0.402",
+    "tesseract": "5.5.0",
+    "pdftotext": "25.03.0",
+    "pdftoppm": "26.05.0"
+  },
+  "checks": [
+    {
+      "name": "focused_dotnet_security_tests",
+      "status": "passed",
+      "passed": 31,
+      "failed": 0,
+      "filter": "LocalPayrollTests|AuthDoesNotTrustUserEditableRole|AgentsAndEmployeesCannotUseAdministration|UnsafeProviderDestinationsAreRejected|SecretsRequireHttpsInProductionAndCrossOriginWritesAreRejected|KeysAreEncryptedAndNeverReturnedOrIncludedInAuditSnapshots|AStoredKeyCannotBeForwardedToAnotherProvider|NumericalNarrationIsRejected|ModelCannotOverrideNetNumbers"
+    },
+    {
+      "name": "isolated_supabase_integration",
+      "command": "python3 -u scripts/supabase-smoke.py",
+      "status": "passed",
+      "coverage": [
+        "PostgreSQL/PostgREST",
+        "anonymous RLS denial",
+        "controlled GoTrue fixture",
+        "employee/admin authorization",
+        "cross-employee payslip access denial",
+        "encrypted connection persistence",
+        "bootstrap denial"
+      ],
+      "limitation": "Not a hosted Supabase/Auth or production-configuration check"
+    },
+    {
+      "name": "npm_audit",
+      "command": "npm audit --json",
+      "status": "completed",
+      "reported_vulnerabilities": 0,
+      "reported_dependencies": 121
+    },
+    {
+      "name": "nuget_audit",
+      "command": "node scripts/dotnet.mjs list backend/CarWise.Api package --vulnerable --include-transitive --format json",
+      "status": "completed",
+      "reported_vulnerable_packages": 0,
+      "source": "https://api.nuget.org/v3/index.json"
+    },
+    {
+      "name": "limited_secret_pattern_scan",
+      "status": "completed",
+      "tracked_text_files_scanned": 100,
+      "max_file_bytes": 2000000,
+      "patterns": [
+        "private key headers",
+        "OpenAI key prefixes",
+        "Google API key prefix",
+        "Supabase secret prefix",
+        "AWS access IDs"
+      ],
+      "matches_reviewed": [
+        {
+          "file": "backend/CarWise.Tests/ConnectionAndAccountTests.cs",
+          "line": 18,
+          "classification": "synthetic TEST_ONLY fixture"
+        },
+        {
+          "file": "scripts/startup-checks.py",
+          "line": 25,
+          "classification": "synthetic TEST_ONLY fixture"
+        }
+      ],
+      "limitations": [
+        "not full Git history",
+        "not all secret formats",
+        "not large or binary files"
+      ]
+    },
+    {
+      "name": "current_local_built_js_secret_pattern_scan",
+      "status": "completed",
+      "files": 1,
+      "matches": 0,
+      "limitation": "Selected patterns only; current local build, not deployed assets"
+    },
+    {
+      "name": "synthetic_log_marker_check",
+      "status": "completed",
+      "matches": 0,
+      "scope": ".local/smoke-server.log from prior implementation smoke; selected synthetic document markers",
+      "limitation": "Does not cover deployment logs, proxy, APM, swap or backups"
+    }
+  ],
+  "official_sources": [
+    {
+      "url": "https://ai.google.dev/gemini-api/docs/models",
+      "status": "retrieved",
+      "observed": "gemini-4-argon listed as Stable; not evidence of Google Cloud ZDR"
+    },
+    {
+      "url": "https://ai.google.dev/gemini-api/terms",
+      "status": "retrieved",
+      "observed": "Paid services distinguish no product-improvement use from limited prompt/response logging; account-specific terms still require review"
+    },
+    {
+      "url": "https://cloud.google.com/vertex-ai/generative-ai/docs/learn/zero-data-retention",
+      "status": "not_verified",
+      "reason": "Network request blocked with 403; extended access did not complete"
+    }
+  ],
+  "not_tested": [
+    "production accounts and infrastructure",
+    "MFA enforcement",
+    "OS worker sandbox and egress denial",
+    "antimalware service",
+    "automated retention and deletion",
+    "production backup restore",
+    "full Git-history secret scanning",
+    "native dependency CVEs",
+    "independent penetration testing",
+    "Google Cloud project and contractual ZDR configuration"
+  ]
+}
