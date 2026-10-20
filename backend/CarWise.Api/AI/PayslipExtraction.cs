@@ -6,12 +6,9 @@ using CarWise.Api.Accounting;
 using CarWise.Api.Domain;
 using CarWise.Api.Infrastructure;
 namespace CarWise.Api.AI;
-public sealed record PayslipField(decimal? Value,string? Evidence);
-public sealed record PayslipResult(Dictionary<string,PayslipField> Fields,List<string> Warnings,long ConfigurationRevision)
-{public string Source {get;init;}="local";}
 public static class PayslipExtraction
 {
-    public static readonly Dictionary<string,decimal> Limits=new(){["salary"]=200000,["commission"]=200000,["bonus"]=200000,["pension"]=20,["fund"]=20,["credits"]=30,["participation"]=20000};
+    public static readonly IReadOnlyDictionary<string,decimal> Limits=PayslipFields.Limits;
     public static JsonNode Schema()
     {
         var properties=new JsonObject();foreach(var key in Limits.Keys)properties[key]=new JsonObject{["type"]="object",["additionalProperties"]=false,

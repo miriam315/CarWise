@@ -114,7 +114,8 @@ builder.Services.AddScoped(sp=>sp.GetRequiredService<ConfigurationSnapshot>().Da
 builder.Services.AddScoped<PayrollEngine>();
 builder.Services.AddSingleton(repository);builder.Services.AddSingleton(database);
 builder.Services.AddSingleton<AiKeyHealth>();
-builder.Services.AddSingleton<ILocalPayslipOcr>(new LocalPayslipOcr(builder.Configuration,root));
+builder.Services.AddSingleton<IOcrSandboxRuntime,DockerOcrRuntime>();
+builder.Services.AddSingleton<ILocalPayslipOcr,SandboxedPayslipOcr>();
 builder.Services.AddSingleton<SecretVault>();builder.Services.AddSingleton<ConfigurationService>();
 builder.Services.AddHostedService<ConfigurationRefreshWorker>();
 builder.Services.AddSingleton<ExchangeRates>();builder.Services.AddSingleton<UsageReports>();

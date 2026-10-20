@@ -1,18 +1,37 @@
-// Installs language data only. Tesseract and Poppler run locally and never download on upload.
-import {mkdir,readFile,writeFile} from 'node:fs/promises';
-import {resolve} from 'node:path';
+// Build a local isolated worker. No document is uploaded and no image is pulled during OCR.
+import {spawnSync} from 'node:child_process';
+import {mkdir,readFile,writeFile,rm} from 'node:fs/promises';
+import {createReadStream} from 'node:fs';
+import {resolve,join} from 'node:path';
 import {createHash} from 'node:crypto';
-const root=resolve(import.meta.dirname,'..','.local','ocr','tessdata');
-const revision='87416418657359cb625c412a48b6e1d6d41c29bd';
-const hashes={eng:'7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2',heb:'11f9e43ab227f786352a50f75c94c2e9906f1baba86d93276da19da7ce0904db'};
-await mkdir(root,{recursive:true,mode:0o700});
-for(const [language,expected] of Object.entries(hashes)){
- const path=resolve(root,language+'.traineddata');
- const valid=bytes=>createHash('sha256').update(bytes).digest('hex')===expected;
- try{if(valid(await readFile(path))){console.log(language+': verified language data already installed');continue}}catch{}
- const response=await fetch(`https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/${revision}/${language}.traineddata`,{signal:AbortSignal.timeout(60000)});
- if(!response.ok)throw Error(`Language download failed (${response.status})`);
- const bytes=Buffer.from(await response.arrayBuffer());if(!valid(bytes))throw Error('OCR language SHA-256 mismatch; refusing to install');
- await writeFile(path,bytes,{mode:0o600});console.log(language+': installed SHA-256 verified language data');
+const root=resolve(import.meta.dirname,'..'),context=join(root,'.local','ocr-worker'),cache=join(root,'.local','ocr-downloads');
+function run(command,args,capture=false){const result=spawnSync(command,args,{cwd:root,encoding:'utf8',stdio:capture?'pipe':'inherit'});if(result.error||result.status!==0)throw Error(`${command} failed (exit ${result.status??'unavailable'}). Check the command output above, installation and network access, then retry npm run ocr:setup.`);return capture?result.stdout.trim():'';}
+if(run('docker',['info','--format','{{.OSType}}'],true)!=='linux')throw Error('OCR isolation requires the Docker Linux engine. Switch Docker Desktop to Linux containers.');
+const architecture=run('docker',['info','--format','{{.Architecture}}'],true);
+const rid=architecture==='x86_64'?'linux-x64':architecture==='aarch64'?'linux-arm64':null;
+if(!rid)throw Error('Supported OCR architectures: Linux x64 and ARM64.');
+await mkdir(context,{recursive:true,mode:0o700});await mkdir(cache,{recursive:true,mode:0o700});
+const metadataPath=join(cache,'releases-10.json');
+run('curl',['--fail','--location','--silent','--show-error','--max-time','60','https://builds.dotnet.microsoft.com/dotnet/release-metadata/10.0/releases.json','--output',metadataPath]);
+const metadata=JSON.parse(await readFile(metadataPath,'utf8'));
+const release=metadata.releases.find(release=>release['aspnetcore-runtime']?.files?.some(file=>file.name===`aspnetcore-runtime-${rid}.tar.gz`));
+const artifact=release?.['aspnetcore-runtime'].files.find(file=>file.name===`aspnetcore-runtime-${rid}.tar.gz`);
+if(!artifact?.url?.startsWith('https://builds.dotnet.microsoft.com/')||!/^[a-fA-F0-9]{128}$/.test(artifact.hash))throw Error('Unexpected official runtime artifact.');
+const archive=join(cache,`aspnetcore-${release['release-version']}-${rid}.tar.gz`);
+async function valid(){try{const hash=createHash('sha512');for await(const chunk of createReadStream(archive))hash.update(chunk);return hash.digest('hex').toLowerCase()===artifact.hash.toLowerCase()}catch{return false}}
+if(!await valid()){
+ console.log('Downloading the official Linux .NET runtime...');
+ run('curl',['--fail','--location','--silent','--show-error','--max-time','60',artifact.url,'--output',archive]);
+ if(!await valid()){await rm(archive,{force:true});throw Error('Official runtime SHA-512 mismatch; refusing to build.');}
 }
-console.log('Restart CarWise after installing local Tesseract and Poppler. See docs/local-payslip-ocr.md.');
+await rm(join(context,'runtime'),{recursive:true,force:true});await mkdir(join(context,'runtime'),{recursive:true});
+run('tar',['-xzf',archive,'-C',join(context,'runtime')]);
+run(process.execPath,['scripts/dotnet.mjs','publish','backend/CarWise.Ocr.Worker','-c','Release','-o',join(context,'publish'),'--nologo']);
+await writeFile(join(context,'.dockerignore'),'*\n!publish/\n!publish/**\n!runtime/\n!runtime/**\n');
+run('docker',['pull','ubuntu:24.04']);
+const base=JSON.parse(run('docker',['image','inspect','ubuntu:24.04','--format','{{json .RepoDigests}}'],true)).find(value=>/^ubuntu@sha256:[a-f0-9]{64}$/.test(value));
+if(!base)throw Error('Cannot pin the approved base image to a digest.');
+run('docker',['build','--no-cache','--file',join(root,'deploy','ocr','Dockerfile'),'--build-arg',`OCR_BASE_IMAGE=${base}`,'--tag','carwise-ocr:1',context]);
+const image=run('docker',['image','inspect','carwise-ocr:1','--format','{{.Id}}'],true);
+await writeFile(join(context,'build-info.json'),JSON.stringify({image,base,runtime:release['release-version'],runtimeSha512:artifact.hash,rid},null,2)+'\n',{mode:0o600});
+console.log('Isolated OCR image ready:',image);console.log('Restart CarWise. No host Tesseract installation is required. See docs/local-payslip-ocr.md.');

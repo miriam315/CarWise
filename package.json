@@ -13,7 +13,8 @@
     "server:build": "node scripts/dotnet.mjs build backend/CarWise.Api --nologo",
     "db:start": "node scripts/dev-db.mjs",
     "db:import": "node scripts/dotnet.mjs run --project backend/CarWise.Api --no-launch-profile -- --import-data",
-    "ocr:setup": "node scripts/setup-ocr.mjs"
+    "ocr:setup": "node scripts/setup-ocr.mjs",
+    "ocr:verify": "node scripts/verify-ocr.mjs"
   },
   "dependencies": {
     "@fontsource/heebo": "^5.3.0",

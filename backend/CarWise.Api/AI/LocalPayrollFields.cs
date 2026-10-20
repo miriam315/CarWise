@@ -40,7 +40,7 @@ public static class LocalPayrollFields
                         RegexOptions.IgnoreCase|RegexOptions.CultureInvariant,TimeSpan.FromMilliseconds(100));
                     if(!match.Success||!decimal.TryParse(match.Groups["amount"].Value.Replace(",",""),NumberStyles.AllowDecimalPoint,CultureInfo.InvariantCulture,out var value))continue;
                     var percent=key is "pension" or "fund";
-                    if(percent!=(match.Groups["unit"].Value=="%")||value<0||value>PayslipExtraction.Limits[key])continue;
+                    if(percent!=(match.Groups["unit"].Value=="%")||value<0||value>PayslipFields.Limits[key])continue;
                     found[key].Add(value);
                 }
         }
