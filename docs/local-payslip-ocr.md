@@ -12,6 +12,8 @@ winget install --id Docker.DockerDesktop --exact --source winget
 
 פתחו Docker Desktop, השלימו את הגדרת WSL 2 אם תתבקשו, וודאו שנבחרו Linux containers. השרת חייב לפעול באותו מחשב שבו מנוע Docker; חיבור למנוע דרך TCP/SSH נדחה. בלינוקס העדיפו מנוע מקומי ייעודי במצב rootless, בהתאם למדיניות הארגון.
 
+לפני ההתקנה הריצו `docker info` ב־CMD. אם מתקבלת שגיאת חיבור למנוע, יש לפתוח Docker Desktop ולהמתין שהוא מסיים לעלות; התקנת Docker לבדה אינה מפעילה את המנוע. אם מוצגת שגיאת WSL, יש להשלים את ההנחיה שמופיעה ב־Docker Desktop. סקריפטי ההתקנה והאימות עוצרים מראש ומציגים את שגיאת Docker המקורית. אין להריץ `ocr:verify` לפני ש־`ocr:setup` הסתיים בהצלחה.
+
 מתיקיית הפרויקט:
 
 ```sh

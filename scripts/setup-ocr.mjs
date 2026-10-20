@@ -4,10 +4,11 @@ import {mkdir,readFile,writeFile,rm} from 'node:fs/promises';
 import {createReadStream} from 'node:fs';
 import {resolve,join} from 'node:path';
 import {createHash} from 'node:crypto';
+import {checkOcrDocker} from './ocr-docker.mjs';
 const root=resolve(import.meta.dirname,'..'),context=join(root,'.local','ocr-worker'),cache=join(root,'.local','ocr-downloads');
-function run(command,args,capture=false){const result=spawnSync(command,args,{cwd:root,encoding:'utf8',stdio:capture?'pipe':'inherit'});if(result.error||result.status!==0)throw Error(`${command} failed (exit ${result.status??'unavailable'}). Check the command output above, installation and network access, then retry npm run ocr:setup.`);return capture?result.stdout.trim():'';}
-if(run('docker',['info','--format','{{.OSType}}'],true)!=='linux')throw Error('OCR isolation requires the Docker Linux engine. Switch Docker Desktop to Linux containers.');
-const architecture=run('docker',['info','--format','{{.Architecture}}'],true);
+function run(command,args,capture=false){const result=spawnSync(command,args,{cwd:root,encoding:'utf8',stdio:capture?'pipe':'inherit'});if(result.error||result.status!==0){if(capture&&result.stderr)process.stderr.write(result.stderr);throw Error(`${command} failed (exit ${result.status??'unavailable'}). Check the command output above, installation and network access, then retry npm run ocr:setup.`);}return capture?result.stdout.trim():'';}
+let architecture;
+try{architecture=checkOcrDocker();}catch(error){console.error(error.message);process.exit(1);}
 const rid=architecture==='x86_64'?'linux-x64':architecture==='aarch64'?'linux-arm64':null;
 if(!rid)throw Error('Supported OCR architectures: Linux x64 and ARM64.');
 await mkdir(context,{recursive:true,mode:0o700});await mkdir(cache,{recursive:true,mode:0o700});
