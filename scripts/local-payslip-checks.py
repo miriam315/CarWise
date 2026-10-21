@@ -35,6 +35,8 @@ def check(page,query,upload,nav,screenshots):
  saved=query('/admin/configuration',{'expectedRevision':baseline['revision'],'configuration':config,'note':'synthetic local OCR verification, no external AI'})
  assert query('/payslip/status')['enabled'],query('/payslip/status')
  pdf,png,scanned,jpeg,large=fixtures();usage_before=query('/admin/usage')['items']
+ from importlib.machinery import SourceFileLoader
+ SourceFileLoader('payslip_upload_ui_checks',str(screenshots.parent.parent/'scripts/payslip-upload-ui-checks.py')).load_module().check(page,nav,pdf,png,jpeg,large,screenshots)
  def extract(data):
   result=upload('/payslip/extract?employee=E-001&consent=true',data)
   serialized=json.dumps(result,ensure_ascii=False)
@@ -54,6 +56,8 @@ def check(page,query,upload,nav,screenshots):
   page.get_by_label('העלאת תלוש שכר').set_input_files({'name':'synthetic-private-payslip.pdf','mimeType':'application/pdf','buffer':pdf})
   page.locator('.payslip-consent input').check();page.get_by_role('button',name='חילוץ נתונים מהתלוש',exact=True).click()
   expect(page.get_by_label('חילוץ שכר בסיס חודשי (₪)',exact=True)).to_have_value('19000.25',timeout=30000)
+  expect(page.get_by_label('תצוגה מקדימה של התלוש',exact=True)).to_be_visible()
+  expect(page.get_by_role('button',name='העמוד הבא',exact=True)).to_be_disabled()
   assert query('/conversation/E-001')['employee']['salary']==before['salary'] # Extraction is read-only.
   expect(page.get_by_label('אישור שכר בסיס חודשי (₪)',exact=True)).not_to_be_checked()
   page.get_by_role('button',name='אישור והעברת השדות המסומנים לטופס').click()

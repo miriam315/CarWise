@@ -105,7 +105,9 @@ def check(page,query,nav,screenshots):
  page.get_by_label('הפעלת חילוץ תלושים').uncheck();page.get_by_label('סיבת שינוי הגדרות').fill('disable payslips independently')
  page.get_by_role('button',name='שמירה והפעלה',exact=True).click();expect(page.locator('.admin-success')).to_contain_text('נשמרו והופעלו')
  nav('הנתונים שלי');expect(page.get_by_text('חילוץ תלושים כבוי בהגדרות השמורות.',exact=False)).to_be_visible()
- assert page.get_by_label('העלאת תלוש שכר').count()==0
+ expect(page.get_by_label('העלאת תלוש שכר')).to_have_count(1)
+ expect(page.get_by_role('button',name='צילום תלוש',exact=True)).to_be_enabled()
+ expect(page.get_by_role('button',name='חילוץ נתונים מהתלוש',exact=True)).to_be_disabled()
  # Simulate a saved administrator change while the worker's page is already open.
  latest=query('/admin/configuration');latest['configuration']['ai']['payslipEnabled']=True
  saved=query('/admin/configuration',{'expectedRevision':latest['revision'],'configuration':latest['configuration'],'note':'another administrator enables documents'})

@@ -4,7 +4,7 @@
 
 ## הפעלה מקומית
 
-דרישות: **Node.js 22+**, **.NET 10 SDK**. לחיבור Supabase אין צורך ב־Docker או ב־Python.
+דרישות: **Node.js 22.13+ או 24+**, **.NET 10 SDK**. לחיבור Supabase אין צורך ב־Docker או ב־Python.
 
 ```bash
 npm ci
