@@ -8,21 +8,27 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 0.0.0.0",
     "server": "node scripts/dotnet.mjs run --project backend/CarWise.Api --no-launch-profile",
-    "test": "node scripts/dotnet.mjs test backend/CarWise.Tests --nologo",
+    "test": "node scripts/browser-payroll-tests.mjs && node scripts/dotnet.mjs test backend/CarWise.Tests --nologo",
     "start": "npm run server",
     "server:build": "node scripts/dotnet.mjs build backend/CarWise.Api --nologo",
     "db:start": "node scripts/dev-db.mjs",
     "db:import": "node scripts/dotnet.mjs run --project backend/CarWise.Api --no-launch-profile -- --import-data",
     "ocr:setup": "node scripts/setup-ocr.mjs",
     "ocr:verify": "node scripts/verify-ocr.mjs",
-    "ocr:verify:complex": "node scripts/verify-complex-payslips.mjs"
+    "ocr:verify:complex": "node scripts/verify-complex-payslips.mjs",
+    "prebuild": "node scripts/browser-ocr-assets.mjs",
+    "predev": "node scripts/browser-ocr-assets.mjs",
+    "browser-ocr:setup": "node scripts/browser-ocr-assets.mjs",
+    "test:browser-payroll": "node scripts/browser-payroll-tests.mjs",
+    "verify:innovations": "python3 scripts/verify-innovations.py"
   },
   "dependencies": {
     "@fontsource/heebo": "^5.3.0",
     "lucide-react": "^0.468.0",
     "pdfjs-dist": "6.4.299",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "tesseract.js": "6.0.1"
   },
   "devDependencies": {
     "@types/react": "^19.0.0",

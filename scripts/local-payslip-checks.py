@@ -57,6 +57,7 @@ def check(page,query,upload,nav,screenshots):
   with ZipFile(screenshots.parent.parent/'examples/payslips/complex/CarWise-complex-demo-payslips.zip') as archive:
    dense=archive.read(next(name for name in archive.namelist() if name.endswith('/01-complex-monthly.pdf') or name=='01-complex-monthly.pdf'))
   page.get_by_label('העלאת תלוש שכר').set_input_files({'name':'synthetic-dense-payslip.pdf','mimeType':'application/pdf','buffer':dense})
+  page.get_by_label('מיקום עיבוד התלוש').select_option('server')
   page.locator('.payslip-consent input').check();page.get_by_role('button',name='חילוץ נתונים מהתלוש',exact=True).click()
   expect(page.get_by_label('חילוץ שכר בסיס חודשי (₪)',exact=True)).to_have_value('19000.25',timeout=30000)
   expect(page.locator('.payslip-review [role=status]')).to_contain_text('זוהו 7 מתוך 7 שדות')

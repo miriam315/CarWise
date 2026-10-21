@@ -1,8 +1,11 @@
+import type {Box} from './payrollLayout';
+import PayslipHighlights from './PayslipHighlights';
 import {useEffect,useRef,useState} from 'react';
 import {getDocument,GlobalWorkerOptions} from 'pdfjs-dist';
 import type {PDFDocumentProxy,RenderTask} from 'pdfjs-dist';
 GlobalWorkerOptions.workerSrc=new URL('pdfjs-dist/build/pdf.worker.min.mjs',import.meta.url).href;
-export default function PayslipPdfPreview({file,zoom}:{file:File;zoom:number}){
+export default function PayslipPdfPreview({file,zoom,boxes}:{file:File;zoom:number;boxes?:Box[]}){
+ const layer=useRef<HTMLDivElement>(null);
  const canvas=useRef<HTMLCanvasElement>(null);
  const [document,setDocument]=useState<PDFDocumentProxy|null>(null),[page,setPage]=useState(1),[error,setError]=useState(''),[loading,setLoading]=useState(true);
  useEffect(()=>{
@@ -16,6 +19,7 @@ export default function PayslipPdfPreview({file,zoom}:{file:File;zoom:number}){
   }).catch(()=>{if(active){window.clearTimeout(timeout);setError('לא ניתן להציג את ה־PDF. בדקו שהוא תקין ואינו מוגן בסיסמה, או בחרו תמונה.');setLoading(false)}});
   return()=>{active=false;window.clearTimeout(timeout);void task?.destroy().catch(()=>{})};
  },[file]);
+ useEffect(()=>{if(boxes?.length)setPage(boxes[0].page+1)},[boxes]);
  useEffect(()=>{
   if(!document)return;
   let active=true,expired=false;let rendering:RenderTask|undefined;setLoading(true);setError('');
@@ -29,5 +33,6 @@ export default function PayslipPdfPreview({file,zoom}:{file:File;zoom:number}){
   }).catch(()=>{window.clearTimeout(timeout);if(active&&!expired){setError('לא ניתן להציג את העמוד הזה. נסו עמוד אחר או קובץ אחר.');setLoading(false)}});
   return()=>{active=false;window.clearTimeout(timeout);rendering?.cancel()};
  },[document,page]);
- return <><div className="payslip-preview-pages"><button type="button" className="outline-button" disabled={!document||document.loadingTask.destroyed||page<=1||loading} onClick={()=>setPage(p=>p-1)}>העמוד הקודם</button><span aria-live="polite">עמוד {page} מתוך {document?.numPages??'…'}</span><button type="button" className="outline-button" disabled={!document||document.loadingTask.destroyed||page>=document.numPages||loading} onClick={()=>setPage(p=>p+1)}>העמוד הבא</button></div>{loading&&<p role="status">טוענים את התלוש…</p>}{error&&<p role="alert">{error}</p>}<div className="payslip-preview-body" dir="ltr" hidden={!!error}><canvas ref={canvas} style={{width:zoom+'%'}} aria-label={'תצוגת PDF של התלוש — עמוד '+page}/></div></>;
+ useEffect(()=>{if(!loading&&boxes?.length)layer.current?.querySelector('.payslip-highlight.value')?.scrollIntoView({behavior:'smooth',block:'center'})},[boxes,page,loading]);
+ return <><div className="payslip-preview-pages"><button type="button" className="outline-button" disabled={!document||document.loadingTask.destroyed||page<=1||loading} onClick={()=>setPage(p=>p-1)}>העמוד הקודם</button><span aria-live="polite">עמוד {page} מתוך {document?.numPages??'…'}</span><button type="button" className="outline-button" disabled={!document||document.loadingTask.destroyed||page>=document.numPages||loading} onClick={()=>setPage(p=>p+1)}>העמוד הבא</button></div>{loading&&<p role="status">טוענים את התלוש…</p>}{error&&<p role="alert">{error}</p>}<div className="payslip-preview-body" dir="ltr" hidden={!!error}><div ref={layer} className="payslip-image-layer" style={{width:zoom+'%'}}><canvas ref={canvas} style={{width:'100%'}} aria-label={'תצוגת PDF של התלוש — עמוד '+page}/><PayslipHighlights boxes={boxes} page={page-1}/></div></div></>;
 }

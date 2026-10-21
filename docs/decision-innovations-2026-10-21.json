@@ -1,0 +1,605 @@
+{
+  "date": "2026-10-21",
+  "syntheticDataOnly": true,
+  "liveSupabaseProjectUsed": false,
+  "liveAiProviderUsed": false,
+  "checks": {
+    "frontendBuild": "passed",
+    "dotnetPassed": 219,
+    "dotnetFailed": 0,
+    "dotnetSkipped": 0,
+    "browserPayrollSafety": "passed",
+    "postgresFullSmoke": "passed",
+    "supabasePostgrestFullSmoke": "passed; includes private decision records, active policy and registry updates, vehicle identity guard, first setup and endpoint role isolation",
+    "npmProductionAuditKnownVulnerabilities": 0
+  },
+  "browserFullDataset": {
+    "browserFiles": [
+      {
+        "file": "01-complex-monthly-scanned.pdf",
+        "seconds": 9.951,
+        "values": {
+          "salary": "19000.25",
+          "commission": "1000",
+          "bonus": "0",
+          "pension": "6",
+          "fund": "2.5",
+          "credits": "2.25",
+          "participation": "350"
+        },
+        "missing": [],
+        "wrong": {}
+      },
+      {
+        "file": "01-complex-monthly.jpg",
+        "seconds": 7.427,
+        "values": {
+          "salary": "19000.25",
+          "commission": "1000",
+          "bonus": "0",
+          "pension": "6",
+          "fund": "2.5",
+          "credits": "2.25",
+          "participation": "350"
+        },
+        "missing": [],
+        "wrong": {}
+      },
+      {
+        "file": "01-complex-monthly.pdf",
+        "seconds": 0.224,
+        "values": {
+          "salary": "19000.25",
+          "commission": "1000",
+          "bonus": "0",
+          "pension": "6",
+          "fund": "2.5",
+          "credits": "2.25",
+          "participation": "350"
+        },
+        "missing": [],
+        "wrong": {}
+      },
+      {
+        "file": "01-complex-monthly.png",
+        "seconds": 6.875,
+        "values": {
+          "salary": "19000.25",
+          "commission": "1000",
+          "bonus": "0",
+          "pension": "6",
+          "fund": "2.5",
+          "credits": "2.25",
+          "participation": "350"
+        },
+        "missing": [],
+        "wrong": {}
+      },
+      {
+        "file": "02-complex-sales-scanned.pdf",
+        "seconds": 10.93,
+        "values": {
+          "salary": "12500",
+          "commission": "3250.75",
+          "bonus": "1500",
+          "pension": "6.5",
+          "fund": "2.5",
+          "credits": "2.75",
+          "participation": "0"
+        },
+        "missing": [],
+        "wrong": {}
+      },
+      {
+        "file": "02-complex-sales.jpg",
+        "seconds": 3.345,
+        "values": {
+          "salary": "12500",
+          "commission": "3250.75",
+          "bonus": "1500",
+          "pension": "6.5",
+          "fund": "2.5",
+          "credits": "2.75",
+          "participation": "0"
+        },
+        "missing": [],
+        "wrong": {}
+      },
+      {
+        "file": "02-complex-sales.pdf",
+        "seconds": 0.22,
+        "values": {
+          "salary": "12500",
+          "commission": "3250.75",
+          "bonus": "1500",
+          "pension": "6.5",
+          "fund": "2.5",
+          "credits": "2.75",
+          "participation": "0"
+        },
+        "missing": [],
+        "wrong": {}
+      },
+      {
+        "file": "02-complex-sales.png",
+        "seconds": 3.34,
+        "values": {
+          "salary": "12500",
+          "commission": "3250.75",
+          "bonus": "1500",
+          "pension": "6.5",
+          "fund": "2.5",
+          "credits": "2.75",
+          "participation": "0"
+        },
+        "missing": [],
+        "wrong": {}
+      },
+      {
+        "file": "03-complex-hourly-scanned.pdf",
+        "seconds": 10.414,
+        "values": {
+          "salary": "14364",
+          "commission": "0",
+          "bonus": "750",
+          "pension": "6",
+          "fund": "2.5",
+          "credits": "3.25",
+          "participation": "650"
+        },
+        "missing": [],
+        "wrong": {}
+      },
+      {
+        "file": "03-complex-hourly.jpg",
+        "seconds": 9.398,
+        "values": {
+          "salary": "14364",
+          "commission": "0",
+          "bonus": "750",
+          "pension": "6",
+          "fund": "2.5",
+          "credits": "3.25",
+          "participation": "650"
+        },
+        "missing": [],
+        "wrong": {}
+      },
+      {
+        "file": "03-complex-hourly.pdf",
+        "seconds": 0.222,
+        "values": {
+          "salary": "14364",
+          "commission": "0",
+          "bonus": "750",
+          "pension": "6",
+          "fund": "2.5",
+          "credits": "3.25",
+          "participation": "650"
+        },
+        "missing": [],
+        "wrong": {}
+      },
+      {
+        "file": "03-complex-hourly.png",
+        "seconds": 6.852,
+        "values": {
+          "salary": "14364",
+          "commission": "0",
+          "bonus": "750",
+          "pension": "6",
+          "fund": "2.5",
+          "credits": "3.25",
+          "participation": "650"
+        },
+        "missing": [],
+        "wrong": {}
+      }
+    ],
+    "conditionalBoundary": {
+      "target": "CAR-10",
+      "outcome": "crosses",
+      "rawThreshold": 960.998,
+      "maximumWithoutLoss": 960.99,
+      "minimum": 0,
+      "maximum": 20000,
+      "explanation": "עד השתתפות של 960.99 ₪ החלופה אינה מפחיתה את הנטו; מעל נקודת האיזון היא מפחיתה אותו. זהו תנאי לחישוב בלבד, לא סכום השתתפות מאושר."
+    },
+    "externalRequests": [],
+    "documentUploads": 0,
+    "passed": true,
+    "cancelledWithoutServerFallback": true,
+    "automaticActivePolicyNotification": true
+  },
+  "finalFlowVerification": {
+    "browserFiles": [
+      {
+        "file": "01-complex-monthly.pdf",
+        "seconds": 0.252,
+        "values": {
+          "salary": "19000.25",
+          "commission": "1000",
+          "bonus": "0",
+          "pension": "6",
+          "fund": "2.5",
+          "credits": "2.25",
+          "participation": "350"
+        },
+        "missing": [],
+        "wrong": {}
+      },
+      {
+        "file": "01-complex-monthly.png",
+        "seconds": 6.868,
+        "values": {
+          "salary": "19000.25",
+          "commission": "1000",
+          "bonus": "0",
+          "pension": "6",
+          "fund": "2.5",
+          "credits": "2.25",
+          "participation": "350"
+        },
+        "missing": [],
+        "wrong": {}
+      }
+    ],
+    "conditionalBoundary": {
+      "target": "CAR-10",
+      "outcome": "crosses",
+      "rawThreshold": 960.998,
+      "maximumWithoutLoss": 960.99,
+      "minimum": 0,
+      "maximum": 20000,
+      "explanation": "עד השתתפות של 960.99 ₪ החלופה אינה מפחיתה את הנטו; מעל נקודת האיזון היא מפחיתה אותו. זהו תנאי לחישוב בלבד, לא סכום השתתפות מאושר."
+    },
+    "externalRequests": [],
+    "documentUploads": 0,
+    "passed": true,
+    "cancelledWithoutServerFallback": true,
+    "ineligibleOptionsDisabled": true,
+    "automaticActivePolicyNotification": true
+  },
+  "nativeFullDataset": {
+    "suite": "original-12-dense-synthetic-payslips",
+    "minimumConfidence": 75,
+    "timeoutSeconds": 60,
+    "documents": 12,
+    "expectedFields": 84,
+    "passed": true,
+    "results": [
+      {
+        "file": "01-complex-monthly-scanned.pdf",
+        "source": "local-ocr",
+        "seconds": 10.639,
+        "expected": {
+          "salary": 19000.25,
+          "commission": 1000,
+          "bonus": 0,
+          "pension": 6,
+          "fund": 2.5,
+          "credits": 2.25,
+          "participation": 350
+        },
+        "actual": {
+          "salary": 19000.25,
+          "commission": 1000.0,
+          "bonus": 0.0,
+          "pension": 6,
+          "fund": 2.5,
+          "credits": 2.25,
+          "participation": 350.0
+        },
+        "missing": [],
+        "wrong": []
+      },
+      {
+        "file": "01-complex-monthly.jpg",
+        "source": "local-ocr",
+        "seconds": 5.591,
+        "expected": {
+          "salary": 19000.25,
+          "commission": 1000,
+          "bonus": 0,
+          "pension": 6,
+          "fund": 2.5,
+          "credits": 2.25,
+          "participation": 350
+        },
+        "actual": {
+          "salary": 19000.25,
+          "commission": 1000.0,
+          "bonus": 0.0,
+          "pension": 6,
+          "fund": 2.5,
+          "credits": 2.25,
+          "participation": 350.0
+        },
+        "missing": [],
+        "wrong": []
+      },
+      {
+        "file": "01-complex-monthly.pdf",
+        "source": "local-pdf-text",
+        "seconds": 1.49,
+        "expected": {
+          "salary": 19000.25,
+          "commission": 1000,
+          "bonus": 0,
+          "pension": 6,
+          "fund": 2.5,
+          "credits": 2.25,
+          "participation": 350
+        },
+        "actual": {
+          "salary": 19000.25,
+          "commission": 1000.0,
+          "bonus": 0.0,
+          "pension": 6,
+          "fund": 2.5,
+          "credits": 2.25,
+          "participation": 350.0
+        },
+        "missing": [],
+        "wrong": []
+      },
+      {
+        "file": "01-complex-monthly.png",
+        "source": "local-ocr",
+        "seconds": 4.009,
+        "expected": {
+          "salary": 19000.25,
+          "commission": 1000,
+          "bonus": 0,
+          "pension": 6,
+          "fund": 2.5,
+          "credits": 2.25,
+          "participation": 350
+        },
+        "actual": {
+          "salary": 19000.25,
+          "commission": 1000.0,
+          "bonus": 0.0,
+          "pension": 6,
+          "fund": 2.5,
+          "credits": 2.25,
+          "participation": 350.0
+        },
+        "missing": [],
+        "wrong": []
+      },
+      {
+        "file": "02-complex-sales-scanned.pdf",
+        "source": "local-ocr",
+        "seconds": 7.391,
+        "expected": {
+          "salary": 12500,
+          "commission": 3250.75,
+          "bonus": 1500,
+          "pension": 6.5,
+          "fund": 2.5,
+          "credits": 2.75,
+          "participation": 0
+        },
+        "actual": {
+          "salary": 12500.0,
+          "commission": 3250.75,
+          "bonus": 1500.0,
+          "pension": 6.5,
+          "fund": 2.5,
+          "credits": 2.75,
+          "participation": 0.0
+        },
+        "missing": [],
+        "wrong": []
+      },
+      {
+        "file": "02-complex-sales.jpg",
+        "source": "local-ocr",
+        "seconds": 2.839,
+        "expected": {
+          "salary": 12500,
+          "commission": 3250.75,
+          "bonus": 1500,
+          "pension": 6.5,
+          "fund": 2.5,
+          "credits": 2.75,
+          "participation": 0
+        },
+        "actual": {
+          "salary": 12500.0,
+          "commission": 3250.75,
+          "bonus": 1500.0,
+          "pension": 6.5,
+          "fund": 2.5,
+          "credits": 2.75,
+          "participation": 0.0
+        },
+        "missing": [],
+        "wrong": []
+      },
+      {
+        "file": "02-complex-sales.pdf",
+        "source": "local-pdf-text",
+        "seconds": 0.701,
+        "expected": {
+          "salary": 12500,
+          "commission": 3250.75,
+          "bonus": 1500,
+          "pension": 6.5,
+          "fund": 2.5,
+          "credits": 2.75,
+          "participation": 0
+        },
+        "actual": {
+          "salary": 12500.0,
+          "commission": 3250.75,
+          "bonus": 1500.0,
+          "pension": 6.5,
+          "fund": 2.5,
+          "credits": 2.75,
+          "participation": 0.0
+        },
+        "missing": [],
+        "wrong": []
+      },
+      {
+        "file": "02-complex-sales.png",
+        "source": "local-ocr",
+        "seconds": 2.473,
+        "expected": {
+          "salary": 12500,
+          "commission": 3250.75,
+          "bonus": 1500,
+          "pension": 6.5,
+          "fund": 2.5,
+          "credits": 2.75,
+          "participation": 0
+        },
+        "actual": {
+          "salary": 12500.0,
+          "commission": 3250.75,
+          "bonus": 1500.0,
+          "pension": 6.5,
+          "fund": 2.5,
+          "credits": 2.75,
+          "participation": 0.0
+        },
+        "missing": [],
+        "wrong": []
+      },
+      {
+        "file": "03-complex-hourly-scanned.pdf",
+        "source": "local-ocr",
+        "seconds": 10.551,
+        "expected": {
+          "salary": 14364,
+          "commission": 0,
+          "bonus": 750,
+          "pension": 6,
+          "fund": 2.5,
+          "credits": 3.25,
+          "participation": 650
+        },
+        "actual": {
+          "salary": 14364.0,
+          "commission": 0.0,
+          "bonus": 750.0,
+          "pension": 6,
+          "fund": 2.5,
+          "credits": 3.25,
+          "participation": 650.0
+        },
+        "missing": [],
+        "wrong": []
+      },
+      {
+        "file": "03-complex-hourly.jpg",
+        "source": "local-ocr",
+        "seconds": 7.03,
+        "expected": {
+          "salary": 14364,
+          "commission": 0,
+          "bonus": 750,
+          "pension": 6,
+          "fund": 2.5,
+          "credits": 3.25,
+          "participation": 650
+        },
+        "actual": {
+          "salary": 14364.0,
+          "commission": 0.0,
+          "bonus": 750.0,
+          "pension": 6,
+          "fund": 2.5,
+          "credits": 3.25,
+          "participation": 650.0
+        },
+        "missing": [],
+        "wrong": []
+      },
+      {
+        "file": "03-complex-hourly.pdf",
+        "source": "local-pdf-text",
+        "seconds": 0.716,
+        "expected": {
+          "salary": 14364,
+          "commission": 0,
+          "bonus": 750,
+          "pension": 6,
+          "fund": 2.5,
+          "credits": 3.25,
+          "participation": 650
+        },
+        "actual": {
+          "salary": 14364.0,
+          "commission": 0.0,
+          "bonus": 750.0,
+          "pension": 6,
+          "fund": 2.5,
+          "credits": 3.25,
+          "participation": 650.0
+        },
+        "missing": [],
+        "wrong": []
+      },
+      {
+        "file": "03-complex-hourly.png",
+        "source": "local-ocr",
+        "seconds": 3.851,
+        "expected": {
+          "salary": 14364,
+          "commission": 0,
+          "bonus": 750,
+          "pension": 6,
+          "fund": 2.5,
+          "credits": 3.25,
+          "participation": 650
+        },
+        "actual": {
+          "salary": 14364.0,
+          "commission": 0.0,
+          "bonus": 750.0,
+          "pension": 6,
+          "fund": 2.5,
+          "credits": 3.25,
+          "participation": 650.0
+        },
+        "missing": [],
+        "wrong": []
+      }
+    ]
+  },
+  "fixtureSha256": "4873dde7d3e5fcb34fc6d01c085645501fb77a5b990c9a6bfe00d783632d79fd",
+  "languageModels": {
+    "heb": {
+      "sha256": "11f9e43ab227f786352a50f75c94c2e9906f1baba86d93276da19da7ce0904db",
+      "gzipSha256": "75f21e7a06ba842c5b477c51586b2b11a2aff60166aee183723bc667cc2a88a1",
+      "source": "https://github.com/tesseract-ocr/tessdata_fast",
+      "license": "Apache-2.0",
+      "upstreamMatchVerified": true
+    },
+    "eng": {
+      "sha256": "7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2",
+      "gzipSha256": "f1c22599ed6fd3eb821d87fdb43e09f98b61179a4abe38c43cfca2cdcb9f5ec2",
+      "source": "https://github.com/tesseract-ocr/tessdata_fast",
+      "license": "Apache-2.0",
+      "upstreamMatchVerified": true
+    }
+  },
+  "packages": {
+    "tesseract.js": "6.0.1",
+    "tesseract.js-core": "6.1.2",
+    "pdfjs-dist": "6.4.299"
+  },
+  "workerImageId": "sha256:38ea3dbfe0e135069df05a69e56d9fb7a6afd346bfb64bde18fba589a68f91cd",
+  "workerBuild": "Code-only offline update over the previously verified Linux image; unchanged OS/runtime/tools; actual sandbox policy tests passed.",
+  "limits": [
+    "12 synthetic documents are not a real-world accuracy benchmark.",
+    "Browser timings are desktop Chromium measurements, not mobile guarantees.",
+    "Curves use 11 samples; only the participation threshold is exact according to the payroll engine.",
+    "Alerts are inside the connected website; no email/push/background rewrite.",
+    "Historical months are compared using current rules and current vehicle context, not reconstructed historical payroll.",
+    "Existing security-roadmap items remain open."
+  ]
+}

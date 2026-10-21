@@ -96,7 +96,7 @@ public sealed class LocalPayslipOcr(IConfiguration configuration,string root) : 
                 for(var page=1;page<=pages;page++)
                 {
                     var image=await RunAsync(Executable("PdfToPpmPath","pdftoppm")!,["-f",page.ToString(CultureInfo.InvariantCulture),"-l",page.ToString(CultureInfo.InvariantCulture),"-r","240","-scale-to","3200","-png","-singlefile","-"],document.Bytes,32*1024*1024,deadline.Token);
-                    try{scans.Add(await RecognizeAsync(image,settings,revision,deadline.Token));}finally{CryptographicOperations.ZeroMemory(image);}
+                    try{scans.Add(await RecognizeAsync(image,settings,revision,deadline.Token,page-1));}finally{CryptographicOperations.ZeroMemory(image);}
                 }
                 return LocalPayrollFields.Merge(scans,revision,"local-ocr");
             }
@@ -107,7 +107,7 @@ public sealed class LocalPayslipOcr(IConfiguration configuration,string root) : 
         {throw new ArgumentException($"החילוץ המקומי לא הושלם בתוך {settings.TimeoutSeconds} שניות. נסו קובץ קטן יותר או הזינו את הנתונים ידנית.");}
         finally{capacity.Release();}
     }
-    private async Task<PayslipResult> RecognizeAsync(byte[] bytes,LocalPayslipSettings settings,long revision,CancellationToken ct)
+    private async Task<PayslipResult> RecognizeAsync(byte[] bytes,LocalPayslipSettings settings,long revision,CancellationToken ct,int page=0)
     {
         var passes=new List<PayslipResult>();
         var recognized=new List<IReadOnlyList<PayrollWord>>();
@@ -120,7 +120,7 @@ public sealed class LocalPayslipOcr(IConfiguration configuration,string root) : 
             // actual pixels. Do not rewrite a colon or infer a missing decimal digit.
             if(adaptive)args.AddRange(["-c","thresholding_method=2"]);
             var tsv=await TextAsync(Executable("TesseractPath","tesseract")!,args,bytes,4_000_000,ct);
-            var words=LocalPayrollLayout.ReadTsv(tsv);recognized.Add(words);
+            var words=LocalPayrollLayout.ReadTsv(tsv,page);recognized.Add(words);
             passes.Add(LocalPayrollLayout.Extract(words,settings.MinimumConfidence,revision,"local-ocr",ct));
             // A full table pass already has all seven fields; no second scan is needed.
             if(LocalPayrollFields.Merge(passes,revision,"local-ocr").Fields.All(f=>f.Value.Value is not null))break;
@@ -128,7 +128,7 @@ public sealed class LocalPayslipOcr(IConfiguration configuration,string root) : 
         if(settings.Languages.Contains("heb",StringComparison.Ordinal)&&LocalPayrollFields.Merge(passes,revision,"local-ocr").Fields.Any(f=>f.Value.Value is null))
         {
             var args=TesseractArguments("stdin","stdout","-l","heb","--psm","6","-c","tessedit_create_tsv=1","-c","tessedit_create_txt=0");
-            var hebrew=LocalPayrollLayout.ReadTsv(await TextAsync(Executable("TesseractPath","tesseract")!,args,bytes,4_000_000,ct));
+            var hebrew=LocalPayrollLayout.ReadTsv(await TextAsync(Executable("TesseractPath","tesseract")!,args,bytes,4_000_000,ct),page);
             foreach(var words in recognized)
                 passes.Add(LocalPayrollLayout.Extract(LocalPayrollLayout.WithHebrewLabels(words,hebrew,settings.MinimumConfidence),settings.MinimumConfidence,revision,"local-ocr",ct));
         }

@@ -45,6 +45,12 @@ def check(base,query,settings,service_token):
   expect(page.locator('.sidebar nav').get_by_role('button',name='ניהול המערכת',exact=False)).to_have_count(0);expect(page.locator('.sidebar nav').get_by_role('button',name='מרכז הנציגים',exact=False)).to_have_count(0)
   denied('/conversation/E-002',employee,403);denied('/admin/configuration',employee,403);denied('/admin/server-connection',employee,403)
   denied('/payslip/extract?employee=E-002&consent=true',employee,403,{})
+  denied('/decision/state/E-002',employee,403)
+  other={**own['employees'][0],'id':'E-002'}
+  denied('/decision/analyze',employee,403,{'employee':other,'target':'CAR-10'})
+  denied('/decision/choice',employee,403,{'employee':other,'expectedRevision':0,'target':'CAR-10'})
+  denied('/decision/month',employee,403,{'employee':other,'expectedRevision':0,'month':{'period':'2026-09','fields':{},'bonusKind':'none'}})
+  denied('/decision/month/remove',employee,403,{'employee':other,'expectedRevision':0,'period':'2026-09'})
   denied('/payslip/status','invalid-user-token',401)
   denied('/data','invalid-user-token',401)
   # A real employee session completes only fields the administrator did not confirm.

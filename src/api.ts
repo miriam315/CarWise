@@ -7,10 +7,10 @@ export async function api(path:string,body?:unknown){
  if(!response.ok){if(response.status===401)window.dispatchEvent(new Event('carwise-auth-required'));throw Error(data?.error||'אירעה שגיאה')}
  return data;
 }
-export async function upload(path:string,file:File){
+export async function upload(path:string,file:File,signal?:AbortSignal){
  const headers:Record<string,string>={'Content-Type':'application/octet-stream'};
  const token=sessionStorage.getItem('carwise-access-token');if(token)headers.Authorization='Bearer '+token;
- const response=await fetch('/api'+path,{method:'POST',headers,body:file});
+ const response=await fetch('/api'+path,{method:'POST',headers,body:file,signal});
  if(response.status===429)throw Error('בוצעו יותר מדי העלאות בזמן קצר. המתינו כדקה ונסו שוב.');
  const data=await response.json();if(!response.ok){if(response.status===401)window.dispatchEvent(new Event('carwise-auth-required'));throw Error(data?.error||'העלאת הקובץ נכשלה')}return data;
 }

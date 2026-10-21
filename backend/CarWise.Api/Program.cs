@@ -113,6 +113,7 @@ builder.Services.AddScoped(sp=>sp.GetRequiredService<ConfigurationState>().Curre
 builder.Services.AddScoped(sp=>sp.GetRequiredService<ConfigurationSnapshot>().Data);
 builder.Services.AddScoped<PayrollEngine>();
 builder.Services.AddSingleton(repository);builder.Services.AddSingleton(database);
+builder.Services.AddScoped<DecisionStore>();
 builder.Services.AddSingleton<AiKeyHealth>();
 builder.Services.AddSingleton<IOcrSandboxRuntime,DockerOcrRuntime>();
 builder.Services.AddSingleton<ILocalPayslipOcr,SandboxedPayslipOcr>();
@@ -215,6 +216,7 @@ app.MapGet("/api/data",async(HttpContext context,ConfigurationSnapshot snapshot,
 });
 void AuthorizeEmployee(HttpContext context,AccessControl access,Employee employee)
 {
+    if(employee is null)throw new ArgumentException("חסר פרופיל עובד");
     access.Employee(context,employee.Id);
     var reference=context.RequestServices.GetRequiredService<ReferenceData>();
     if(!demo && context.Items["caller"] is not Caller{IsAdmin:true} && reference.Employees.SingleOrDefault(e=>e.Id==employee.Id)?.Occupation!=employee.Occupation)
@@ -268,7 +270,7 @@ app.MapPost("/api/tickets",async(TicketRequest request,HttpContext context,Acces
     var car=reference.Cars.SingleOrDefault(c=>c.Id==request.Target)??throw new ArgumentException("בחרו רכב מתוך הקטלוג");
     if(!engine.Eligibility(e,car).Eligible)throw new ArgumentException("אין זכאות לרכב המבוקש");
     e=e with{AdvisorState=new("targetParticipation",car.Id,car.Drive=="חשמלי")};
-    var question=request.Question?.Trim()??"מהי השתתפות העובד המאושרת ברכב החדש?";
+    var question=car.ParticipationKnown?request.Question?.Trim()??"מהי השתתפות העובד המאושרת ברכב החדש?":DecisionMath.Question(engine,reference,e,car.Id);
     if(question.Length is 0 or >2000)throw new ArgumentException("יש להזין שאלה עד 2,000 תווים");
     var t=await repository.CreateTicketAsync(e,car.Id,question,ct);return new{id=t.Id,status=t.Status};
 });
@@ -308,6 +310,7 @@ app.MapPost("/api/setup/admin",async(CreateAccount request,HttpContext context,A
 }).WithMetadata(new Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute("login"));
 app.MapAdministration(repository.Provider,supabaseUrl,demo);
 app.MapPayslips();
+app.MapDecisionTools(AuthorizeEmployee);
 var dist=Path.Combine(root,"dist");
 if(!Directory.Exists(dist))dist=Path.Combine(AppContext.BaseDirectory,"wwwroot");
 if(Directory.Exists(dist))

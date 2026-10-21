@@ -53,7 +53,7 @@ try
             settings.MaxPages is <1 or >6||settings.TimeoutSeconds is <10 or >120||settings.MinimumConfidence is <50 or >100)throw new ArgumentException();
         bytes=new byte[request.Length];await input.ReadExactlyAsync(bytes,watchdog.Token);
         var result=await engine.ExtractAsync(AiDocument.Read(bytes),settings,request.Revision,watchdog.Token);
-        Console.Write(JsonSerializer.Serialize(new OcrWorkerResponse(1,true,result.Fields.ToDictionary(field=>field.Key,field=>field.Value.Value),result.Source),json));
+        Console.Write(JsonSerializer.Serialize(new OcrWorkerResponse(1,true,result.Fields.ToDictionary(field=>field.Key,field=>field.Value.Value),result.Source,Regions:result.Regions),json));
     }
     else throw new ArgumentException();
 }

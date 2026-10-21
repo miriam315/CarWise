@@ -54,9 +54,12 @@ public sealed class SandboxedPayslipOcr(IOcrSandboxRuntime runtime) : ILocalPays
         if(reply.Version!=1||reply.Source is not ("local-ocr" or "local-pdf-text")||reply.Fields is null||reply.Fields.Count!=PayslipFields.Limits.Count||
             reply.Fields.Any(field=>!PayslipFields.Limits.TryGetValue(field.Key,out var maximum)||field.Value<0||field.Value>maximum))
             throw new OcrSandboxException("sandbox_invalid_output");
+        if(reply.Regions is not null&&(reply.Regions.Count>7||reply.Regions.Any(p=>!PayslipFields.Limits.ContainsKey(p.Key)||reply.Fields[p.Key] is null||p.Value is null||p.Value.Length>3||p.Value.Any(b=>
+            b.Page is <0 or >5||b.Kind is not ("value" or "label" or "column")||!double.IsFinite(b.X)||!double.IsFinite(b.Y)||!double.IsFinite(b.Width)||!double.IsFinite(b.Height)||
+            b.X<0||b.Y<0||b.Width<=0||b.Height<=0||b.X+b.Width>1.00001||b.Y+b.Height>1.00001))))throw new OcrSandboxException("sandbox_invalid_output");
         // Never trust free text from a potentially compromised native worker. The protocol
         // permits only known field identifiers, bounded numbers and a known source enum.
         var fields=reply.Fields.ToDictionary(field=>field.Key,field=>new PayslipField(field.Value,null));
-        return new(fields,["החילוץ המבודד הוא הצעה בלבד. בדקו כל שדה מול התלוש; ערך חסר או עמום דורש השלמה ידנית. שדות נשמרים רק אחרי אישור ושמירה."],revision){Source=reply.Source};
+        return new(fields,["החילוץ המבודד הוא הצעה בלבד. בדקו כל שדה מול התלוש; ערך חסר או עמום דורש השלמה ידנית. שדות נשמרים רק אחרי אישור ושמירה."],revision){Source=reply.Source,Regions=reply.Regions};
     }
 }

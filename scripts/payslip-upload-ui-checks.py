@@ -12,6 +12,7 @@ def check(page,nav,pdf,png,jpeg,multipage,screenshots):
  page.route('**/api/payslip/status',unavailable)
  try:
   page.reload();page.wait_for_selector('.vehicle-card');nav('הנתונים שלי')
+  page.get_by_label('מיקום עיבוד התלוש').select_option('server')
   expect(page.locator('.payslip-panel .form-info')).to_contain_text('בדיקת ממשק')
   expect(page.get_by_role('button',name='צילום תלוש',exact=True)).to_be_enabled()
   page.evaluate("""() => {window.revokedPayslipUrls=[];const original=URL.revokeObjectURL.bind(URL);
@@ -29,7 +30,7 @@ def check(page,nav,pdf,png,jpeg,multipage,screenshots):
   page.get_by_role('button',name='העמוד הבא',exact=True).click()
   expect(page.get_by_text('עמוד 2 מתוך 4',exact=True)).to_be_visible()
   page.get_by_role('button',name='הגדלת תצוגת התלוש').click()
-  assert page.locator('.payslip-preview canvas').evaluate('(canvas)=>canvas.style.width==="125%"')
+  assert page.locator('.payslip-preview canvas').evaluate('(canvas)=>canvas.parentElement.style.width==="125%"')
   expect(page.get_by_role('button',name='חילוץ נתונים מהתלוש',exact=True)).to_be_disabled()
   page.screenshot(path=str(screenshots/'payslip-drop-pdf-preview.png'),full_page=True)
   # Embedded Hebrew fonts and a dense table must render locally as well.
@@ -52,7 +53,11 @@ def check(page,nav,pdf,png,jpeg,multipage,screenshots):
   page.get_by_label('העלאת תלוש שכר').set_input_files({'name':'fake.pdf','mimeType':'application/pdf','buffer':b'NOT A REAL DOCUMENT'})
   expect(page.locator('.payslip-panel [role=alert]')).to_contain_text('תקינים בלבד')
   drop([('first.pdf','application/pdf',pdf),('second.pdf','application/pdf',pdf)])
-  expect(page.locator('.payslip-panel [role=alert]')).to_contain_text('תלוש אחד')
+  expect(page.locator('.payslip-queue')).to_contain_text('עוד 1 תלושים')
+  page.get_by_role('button',name='מעבר לתלוש הבא').click()
+  expect(page.get_by_text('second.pdf',exact=True)).to_be_visible()
+  drop([(f'file-{i}.pdf','application/pdf',pdf) for i in range(13)])
+  expect(page.locator('.payslip-panel [role=alert]')).to_contain_text('12 תלושים')
   page.get_by_label('העלאת תלוש שכר').set_input_files({'name':'too-large.pdf','mimeType':'application/pdf','buffer':b'%PDF-'+b'0'*(8*1024*1024)})
   expect(page.locator('.payslip-panel [role=alert]')).to_contain_text('8MB')
   # The phone capture picker remains available even when live camera access fails.
@@ -74,4 +79,4 @@ def check(page,nav,pdf,png,jpeg,multipage,screenshots):
  finally:
   page.remove_listener('request',capture);page.unroute('**/api/payslip/status',unavailable)
   page.set_viewport_size({'width':1440,'height':1100});page.reload();page.wait_for_selector('.vehicle-card')
- print('PASS: camera visible without OCR; PDF drop and local page rendering/navigation/zoom; image/phone preview; invalid, oversized and multiple files rejected; no extraction POST before consent; mobile layout and preview URL cleanup.')
+ print('PASS: camera visible without OCR; PDF drop and local page rendering/navigation/zoom; image/phone preview; invalid/oversized/excessive files rejected; multiple documents queued; no extraction POST before consent; mobile layout and preview URL cleanup.')

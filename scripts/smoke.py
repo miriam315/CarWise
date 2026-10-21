@@ -46,6 +46,7 @@ with tempfile.TemporaryDirectory(prefix='carwise-smoke-') as temp:
   from importlib.machinery import SourceFileLoader
   admin_revision=SourceFileLoader('admin_checks',str(ROOT/'scripts/admin-checks.py')).load_module().check_admin(request,dbname,upload_api)
   SourceFileLoader('challenge_checks',str(ROOT/'scripts/challenge-flow-checks.py')).load_module().check(request,dbname)
+  SourceFileLoader('decision_api_checks',str(ROOT/'scripts/decision-api-checks.py')).load_module().check(request)
   data=request('/data');assert data['officialCount']==77988
   employee=data['employees'][0]
   runtime=request('/runtime');assert runtime['server']=='ASP.NET Core 10' and runtime['database']=='PostgreSQL'

@@ -115,8 +115,8 @@ public sealed class AdvisorService(ReferenceData data,PayrollEngine engine,Repos
             else if(result.Pending)
             {
                 nextAwaiting="targetParticipation";
-                await repository.CreateTicketAsync(e,target,"מהי השתתפות העובד המאושרת ברכב החדש? הסכום אינו ידוע בקטלוג או ממתין לאישור.",ct);
-                reply="חסר סכום השתתפות מאושר. שלחתי שאלה לנציג התחבורה. החלופה ממתינה לאישור ותתעדכן אחרי התשובה; לא מוצג נטו סופי לרכב הזה.";
+                await repository.CreateTicketAsync(e,target,DecisionMath.Question(engine,data,e,target),ct);
+                reply="חסר סכום השתתפות מאושר. שלחתי שאלה לנציג התחבורה. החלופה ממתינה לאישור; לא מוצג נטו סופי לרכב הזה. "+DecisionMath.Boundary(engine,data,e,target).Explanation;
             }
             else reply=await NarrateAsync(result,ct);
         }

@@ -5,7 +5,7 @@ using System.Xml.Linq;
 namespace CarWise.Api.AI;
 
 // Geometry stays inside the isolated worker. Only validated numeric fields leave it.
-public sealed record PayrollWord(string Text,double X,double Y,double Width,double Height,double Confidence=100,int Page=0)
+public sealed record PayrollWord(string Text,double X,double Y,double Width,double Height,double Confidence=100,int Page=0,double PageWidth=0,double PageHeight=0)
 {public double CenterX=>X+Width/2;public double CenterY=>Y+Height/2;}
 public static class LocalPayrollLayout
 {
@@ -37,7 +37,7 @@ public static class LocalPayrollLayout
             foreach(var word in element.Descendants().Where(e=>e.Name.LocalName=="word"))
             {
                 double N(string name)=>double.Parse(word.Attribute(name)!.Value,CultureInfo.InvariantCulture);
-                var x=N("xMin");var y=N("yMin");result.Add(new(word.Value,x,y,N("xMax")-x,N("yMax")-y,100,page));
+                var x=N("xMin");var y=N("yMin");result.Add(new(word.Value,x,y,N("xMax")-x,N("yMax")-y,100,page,double.TryParse(element.Attribute("width")?.Value,NumberStyles.Float,CultureInfo.InvariantCulture,out var pw)?pw:0,double.TryParse(element.Attribute("height")?.Value,NumberStyles.Float,CultureInfo.InvariantCulture,out var ph)?ph:0));
             }
             page++;
         }
@@ -45,13 +45,15 @@ public static class LocalPayrollLayout
     }
     public static IReadOnlyList<PayrollWord> ReadTsv(string tsv,int page=0)
     {
-        var result=new List<PayrollWord>();
+        var result=new List<PayrollWord>();double pageWidth=0,pageHeight=0;
         foreach(var row in tsv.Split('\n').Skip(1))
         {
-            var cells=row.TrimEnd('\r').Split('\t',12);if(cells.Length!=12||cells[0]!="5"||string.IsNullOrWhiteSpace(cells[11]))continue;
+            var cells=row.TrimEnd('\r').Split('\t',12);
+            if(cells.Length>=10&&cells[0]=="1"){double.TryParse(cells[8],NumberStyles.Float,CultureInfo.InvariantCulture,out pageWidth);double.TryParse(cells[9],NumberStyles.Float,CultureInfo.InvariantCulture,out pageHeight);}
+            if(cells.Length!=12||cells[0]!="5"||string.IsNullOrWhiteSpace(cells[11]))continue;
             var values=new double[5];var valid=true;
             for(var i=0;i<5;i++)valid&=double.TryParse(cells[i==4?10:i+6],NumberStyles.Float,CultureInfo.InvariantCulture,out values[i]);
-            if(valid)result.Add(new(cells[11],values[0],values[1],values[2],values[3],values[4],page));
+            if(valid)result.Add(new(cells[11],values[0],values[1],values[2],values[3],values[4],page,pageWidth,pageHeight));
         }
         return result;
     }
@@ -75,6 +77,7 @@ public static class LocalPayrollLayout
         if(words.Length>30000)throw new ArgumentException("תוכן המסמך ארוך מדי לעיבוד מקומי.");
         var found=Labels.Keys.ToDictionary(key=>key,_=>new HashSet<decimal>());
         var physicalLines=new List<LocalTextLine>();
+        var regions=new Dictionary<string,PayslipBox[]>();
         foreach(var page in words.GroupBy(w=>w.Page))
         {
             ct.ThrowIfCancellationRequested();
@@ -132,7 +135,7 @@ public static class LocalPayrollLayout
                     if(next.Length>0)
                     {
                         var nearest=next.Where(w=>Math.Abs(w.CenterY-next[0].CenterY)<label.Height*.8).ToArray();
-                        if(nearest.Length==1)Add(key,nearest[0],false);
+                        if(nearest.Length==1)Add(key,nearest[0],false,label,null);
                     }
                     continue;
                 }
@@ -159,19 +162,30 @@ public static class LocalPayrollLayout
                     var right=boundaryHeaders.Where(h=>h.CenterX>header.CenterX).Select(h=>(h.CenterX+header.CenterX)/2).DefaultIfEmpty(header.Right+label.Height*3).Min();
                     var values=page.Where(w=>w.CenterX>left&&w.CenterX<right&&Math.Abs(w.CenterY-label.Y)<label.Height*.9).ToArray();
                     // Text or multiple amounts in one cell are ambiguous; never take first/last.
-                    if(values.Length==1)Add(key,values[0],percent);
+                    if(values.Length==1)Add(key,values[0],percent,label,header);
                     break;
                 }
             }
         }
-        return LocalPayrollFields.Merge([LocalPayrollFields.Result(found,revision,source),
+        var merged=LocalPayrollFields.Merge([LocalPayrollFields.Result(found,revision,source),
             LocalPayrollFields.Extract(physicalLines,minimumConfidence,revision,source,ct)],revision,source);
-        void Add(string key,PayrollWord word,bool percent)
+        return merged with{Regions=regions.Where(p=>merged.Fields[p.Key].Value is not null&&found[p.Key].Count==1).ToDictionary(p=>p.Key,p=>p.Value)};
+        void Add(string key,PayrollWord word,bool percent,Phrase label,Phrase? header)
         {
             if(word.Confidence<minimumConfidence)return;
             var text=Clean(word.Text);var match=Regex.Match(text,"^"+Amount+"$",RegexOptions.CultureInvariant,TimeSpan.FromMilliseconds(100));
             if(!match.Success||!percent&&match.Groups["percent"].Success)return;
-            if(decimal.TryParse(match.Groups["value"].Value.Replace(",",""),NumberStyles.AllowDecimalPoint,CultureInfo.InvariantCulture,out var value)&&value<=PayslipFields.Limits[key])found[key].Add(value);
+            if(decimal.TryParse(match.Groups["value"].Value.Replace(",",""),NumberStyles.AllowDecimalPoint,CultureInfo.InvariantCulture,out var value)&&value<=PayslipFields.Limits[key])
+            {
+                found[key].Add(value);
+                if(word.PageWidth>0&&word.PageHeight>0)
+                {
+                    PayslipBox Box(double x,double y,double width,double height,string kind)=>new(word.Page,Math.Clamp(x/word.PageWidth,0,1),Math.Clamp(y/word.PageHeight,0,1),Math.Clamp(width/word.PageWidth,0,1),Math.Clamp(height/word.PageHeight,0,1),kind);
+                    var boxes=new List<PayslipBox>{Box(word.X,word.Y,word.Width,word.Height,"value"),Box(label.X,label.Words.Min(w=>w.Y),label.Right-label.X,label.Words.Max(w=>w.Y+w.Height)-label.Words.Min(w=>w.Y),"label")};
+                    if(header is not null)boxes.Add(Box(Math.Min(header.X,word.X),header.Words.Min(w=>w.Y),Math.Max(header.Right,word.X+word.Width)-Math.Min(header.X,word.X),word.Y+word.Height-header.Words.Min(w=>w.Y),"column"));
+                    regions[key]=boxes.ToArray();
+                }
+            }
         }
     }
 }

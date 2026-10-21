@@ -1,0 +1,8 @@
+Browser payroll OCR uses Tesseract.js 6.0.1 and tesseract.js-core (Apache-2.0),
+with Hebrew and English tessdata_fast language models (Apache-2.0).
+Upstream sources: https://github.com/naptha/tesseract.js
+https://github.com/naptha/tesseract.js-core
+https://github.com/tesseract-ocr/tessdata_fast
+Language checksums are recorded in models/manifest.json.
+The runtime files are copied from locked npm packages by scripts/browser-ocr-assets.mjs.
+No CDN is contacted while processing a document.

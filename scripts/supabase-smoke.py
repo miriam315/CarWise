@@ -52,6 +52,11 @@ try:
   from importlib.machinery import SourceFileLoader
   auth_fixture=SourceFileLoader('auth_fixture',str(ROOT/'scripts/auth-fixture.py')).load_module().AuthFixture(service_token)
   class Gateway(BaseHTTPRequestHandler):
+   def end_headers(self):
+    # This test gateway serves one request per connection. Tell pooled HTTP
+    # clients explicitly; never replay writes after an interrupted response.
+    self.send_header('Connection','close');self.close_connection=True
+    super().end_headers()
    def log_message(self,*args):pass
    def do_GET(self):self.forward()
    def do_POST(self):self.forward()
@@ -96,6 +101,7 @@ try:
    from importlib.machinery import SourceFileLoader
    SourceFileLoader('admin_checks',str(ROOT/'scripts/admin-checks.py')).load_module().check_admin(query,name,upload_api)
    SourceFileLoader('challenge_checks_rest',str(ROOT/'scripts/challenge-flow-checks.py')).load_module().check(query,name)
+   SourceFileLoader('decision_api_checks_rest',str(ROOT/'scripts/decision-api-checks.py')).load_module().check(query)
    data=query('/data');assert data['officialCount']==77988
    e=data['employees'][0];r=query('/simulate',{'employee':e});a=next(r for r in r['results'] if r['id']=='CAR-10');assert round(a['net'])==11693
    ticket=query('/tickets',{'employee':e,'target':'CAR-10','question':'בדיקת ההשתתפות דרך Supabase adapter'})

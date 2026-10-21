@@ -67,6 +67,16 @@ public sealed class OcrSandboxTests
         fields["salary"]=200001;Assert.Throws<OcrSandboxException>(()=>SandboxedPayslipOcr.Result(good,7));
         Assert.Throws<OcrSandboxException>(()=>SandboxedPayslipOcr.Result(good with{Source="personal excerpt"},7));
     }
+    [Fact] public void CoordinateMetadataIsBoundedAndCannotSmuggleTextOrRegionsForUnknownValues()
+    {
+        var fields=PayslipFields.Limits.ToDictionary(p=>p.Key,_=>(decimal?)null);fields["salary"]=19000;
+        var reply=new OcrWorkerResponse(1,true,fields,"local-pdf-text",Regions:new(){["salary"]=[new(0,.1,.2,.3,.04,"value")]});
+        Assert.Single(SandboxedPayslipOcr.Result(reply,1).Regions!["salary"]);
+        Assert.Throws<OcrSandboxException>(()=>SandboxedPayslipOcr.Result(reply with{Regions=new(){["salary"]=[new(0,double.NaN,0,.1,.1,"value")]}},1));
+        Assert.Throws<OcrSandboxException>(()=>SandboxedPayslipOcr.Result(reply with{Regions=new(){["salary"]=[new(0,.9,0,.3,.1,"value")]}},1));
+        Assert.Throws<OcrSandboxException>(()=>SandboxedPayslipOcr.Result(reply with{Regions=new(){["salary"]=[new(0,0,0,.1,.1,"PRIVATE")]}},1));
+        Assert.Throws<OcrSandboxException>(()=>SandboxedPayslipOcr.Result(reply with{Regions=new(){["bonus"]=[new(0,0,0,.1,.1,"value")]}},1));
+    }
     private sealed class ReplyRuntime(string reply):IOcrSandboxRuntime
     {
         public int Calls {get;private set;}

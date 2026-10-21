@@ -61,7 +61,7 @@ public static class LocalPayrollFields
                 var warning=Labels[key]+": נמצאו ערכים סותרים. השדה נשאר ריק לבדיקה ידנית.";
                 if(!merged.Warnings.Contains(warning))merged.Warnings.Add(warning);
             }
-        return merged;
+        return merged with{Regions=merged.Fields.Where(p=>p.Value.Value is not null).Select(p=>(p.Key,Boxes:materialized.FirstOrDefault(r=>r.Fields[p.Key].Value==p.Value.Value&&r.Regions?.ContainsKey(p.Key)==true)?.Regions?[p.Key])).Where(p=>p.Boxes is not null).ToDictionary(p=>p.Key,p=>p.Boxes!)};
     }
     internal static PayslipResult Result(Dictionary<string,HashSet<decimal>> found,long revision,string source)
     {
