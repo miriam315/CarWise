@@ -60,7 +60,7 @@ public sealed class LocalPayslipOcr(IConfiguration configuration,string root) : 
                 {
                     using var timeout=CancellationTokenSource.CreateLinkedTokenSource(ct);timeout.CancelAfter(TimeSpan.FromSeconds(10));
                     var languages=await TextAsync(Executable("TesseractPath","tesseract")!,TesseractArguments("--list-langs"),[],65536,timeout.Token);
-                    status=settings.Languages.Split('+').All(lang=>languages.Split('\n').Any(line=>line.Trim()==lang))?
+                    status=(settings.Languages=="heb"?"heb+eng":settings.Languages).Split('+').All(lang=>languages.Split('\n').Any(line=>line.Trim()==lang))?
                         new(true,"ready","חילוץ מקומי פעיל. התלוש אינו נשלח ל־AI חיצוני. שדות השכר יישמרו רק לאחר בדיקה ושמירה."):
                         new(false,"ocr_languages_missing","חסרים קובצי שפה ל־OCR המקומי ("+settings.Languages+"). הריצו npm run ocr:setup בשרת ובדקו שוב לאחר כ־20 שניות.");
                 }
@@ -85,36 +85,54 @@ public sealed class LocalPayslipOcr(IConfiguration configuration,string root) : 
                 if(!match.Success||!int.TryParse(match.Groups[1].Value,out var pages)||pages<1)throw new ArgumentException("לא ניתן לקרוא את מספר עמודי ה־PDF. בדקו שהקובץ תקין ואינו מוגן בסיסמה.");
                 if(pages>settings.MaxPages)throw new ArgumentException($"התלוש מכיל {pages} עמודים; המגבלה שהוגדרה היא {settings.MaxPages}. העלו רק את עמודי התלוש הרלוונטיים.");
                 var text=await TextAsync(Executable("PdfToTextPath","pdftotext")!,["-layout","-enc","UTF-8","-","-"],document.Bytes,500_000,deadline.Token);
-                var parsed=LocalPayrollFields.Extract(text.Split('\n').Select(line=>new LocalTextLine(line)),settings.MinimumConfidence,revision,"local-pdf-text",deadline.Token);
+                var boxes=await TextAsync(Executable("PdfToTextPath","pdftotext")!,["-bbox-layout","-enc","UTF-8","-","-"],document.Bytes,4_000_000,deadline.Token);
+                var parsed=LocalPayrollFields.Merge([
+                    LocalPayrollFields.Extract(text.Split('\n').Select(line=>new LocalTextLine(line)),settings.MinimumConfidence,revision,"local-pdf-text",deadline.Token),
+                    LocalPayrollLayout.Extract(LocalPayrollLayout.ReadPdf(boxes),settings.MinimumConfidence,revision,"local-pdf-text",deadline.Token)],revision,"local-pdf-text");
+                // Text PDFs are authoritative when fields are readable. Do not introduce OCR
+                // guesses into a valid text layer or spend a scan pass on absent fields.
                 if(parsed.Fields.Any(field=>field.Value.Value is not null))return parsed;
-                var lines=new List<LocalTextLine>();
+                var scans=new List<PayslipResult>();
                 for(var page=1;page<=pages;page++)
                 {
-                    var image=await RunAsync(Executable("PdfToPpmPath","pdftoppm")!,["-f",page.ToString(CultureInfo.InvariantCulture),"-l",page.ToString(CultureInfo.InvariantCulture),"-r","180","-scale-to","2600","-png","-singlefile","-"],document.Bytes,24*1024*1024,deadline.Token);
-                    try{lines.AddRange(await RecognizeAsync(image,settings,deadline.Token));}finally{CryptographicOperations.ZeroMemory(image);}
+                    var image=await RunAsync(Executable("PdfToPpmPath","pdftoppm")!,["-f",page.ToString(CultureInfo.InvariantCulture),"-l",page.ToString(CultureInfo.InvariantCulture),"-r","240","-scale-to","3200","-png","-singlefile","-"],document.Bytes,32*1024*1024,deadline.Token);
+                    try{scans.Add(await RecognizeAsync(image,settings,revision,deadline.Token));}finally{CryptographicOperations.ZeroMemory(image);}
                 }
-                return LocalPayrollFields.Extract(lines,settings.MinimumConfidence,revision,"local-ocr",deadline.Token);
+                return LocalPayrollFields.Merge(scans,revision,"local-ocr");
             }
             LocalImageLimits.Validate(document);
-            return LocalPayrollFields.Extract(await RecognizeAsync(document.Bytes,settings,deadline.Token),settings.MinimumConfidence,revision,"local-ocr",deadline.Token);
+            return await RecognizeAsync(document.Bytes,settings,revision,deadline.Token);
         }
         catch(OperationCanceledException)when(!ct.IsCancellationRequested)
         {throw new ArgumentException($"החילוץ המקומי לא הושלם בתוך {settings.TimeoutSeconds} שניות. נסו קובץ קטן יותר או הזינו את הנתונים ידנית.");}
         finally{capacity.Release();}
     }
-    private async Task<IReadOnlyList<LocalTextLine>> RecognizeAsync(byte[] bytes,LocalPayslipSettings settings,CancellationToken ct)
+    private async Task<PayslipResult> RecognizeAsync(byte[] bytes,LocalPayslipSettings settings,long revision,CancellationToken ct)
     {
-        var args=TesseractArguments("stdin","stdout","-l",settings.Languages,"--psm","6","-c","tessedit_create_tsv=1","-c","tessedit_create_txt=0");
-        var tsv=await TextAsync(Executable("TesseractPath","tesseract")!,args,bytes,1_000_000,ct);
-        var lines=new Dictionary<string,List<(string Text,double Confidence)>>();
-        foreach(var row in tsv.Split('\n').Skip(1))
+        var passes=new List<PayslipResult>();
+        var recognized=new List<IReadOnlyList<PayrollWord>>();
+        // Automatic page segmentation preserves separate table columns; block mode remains a
+        // second independent pass for simple photos. Conflicting proposals stay unconfirmed.
+        foreach(var (mode,adaptive) in new[]{("3",false),("6",false),("11",false),("11",true)})
         {
-            var cells=row.TrimEnd('\r').Split('\t',12);if(cells.Length!=12||cells[0]!="5"||string.IsNullOrWhiteSpace(cells[11]))continue;
-            if(!double.TryParse(cells[10],NumberStyles.Float,CultureInfo.InvariantCulture,out var confidence))continue;
-            var key=string.Join(':',cells.Skip(1).Take(4));if(!lines.TryGetValue(key,out var words))lines[key]=words=[];
-            words.Add((cells[11],confidence));
+            var args=TesseractArguments("stdin","stdout","-l",settings.Languages=="heb"?"heb+eng":settings.Languages,"--psm",mode,"-c","tessedit_create_tsv=1","-c","tessedit_create_txt=0");
+            // Adaptive thresholding recovers low-contrast/JPEG decimal points from the
+            // actual pixels. Do not rewrite a colon or infer a missing decimal digit.
+            if(adaptive)args.AddRange(["-c","thresholding_method=2"]);
+            var tsv=await TextAsync(Executable("TesseractPath","tesseract")!,args,bytes,4_000_000,ct);
+            var words=LocalPayrollLayout.ReadTsv(tsv);recognized.Add(words);
+            passes.Add(LocalPayrollLayout.Extract(words,settings.MinimumConfidence,revision,"local-ocr",ct));
+            // A full table pass already has all seven fields; no second scan is needed.
+            if(LocalPayrollFields.Merge(passes,revision,"local-ocr").Fields.All(f=>f.Value.Value is not null))break;
         }
-        return lines.Values.Select(words=>new LocalTextLine(string.Join(' ',words.Select(w=>w.Text)),words.Min(w=>w.Confidence))).ToArray();
+        if(settings.Languages.Contains("heb",StringComparison.Ordinal)&&LocalPayrollFields.Merge(passes,revision,"local-ocr").Fields.Any(f=>f.Value.Value is null))
+        {
+            var args=TesseractArguments("stdin","stdout","-l","heb","--psm","6","-c","tessedit_create_tsv=1","-c","tessedit_create_txt=0");
+            var hebrew=LocalPayrollLayout.ReadTsv(await TextAsync(Executable("TesseractPath","tesseract")!,args,bytes,4_000_000,ct));
+            foreach(var words in recognized)
+                passes.Add(LocalPayrollLayout.Extract(LocalPayrollLayout.WithHebrewLabels(words,hebrew,settings.MinimumConfidence),settings.MinimumConfidence,revision,"local-ocr",ct));
+        }
+        return LocalPayrollFields.Merge(passes,revision,"local-ocr");
     }
     private static async Task<string> TextAsync(string executable,IEnumerable<string> arguments,byte[] input,int maxBytes,CancellationToken ct)
     {var output=await RunAsync(executable,arguments,input,maxBytes,ct);try{return Encoding.UTF8.GetString(output);}finally{CryptographicOperations.ZeroMemory(output);}}

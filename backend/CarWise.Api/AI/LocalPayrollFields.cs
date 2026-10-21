@@ -17,9 +17,9 @@ public static class LocalPayrollFields
         ["credits"]=@"(?:נקודות זיכוי|נק[.׳']? זיכוי|tax credit points)",
         ["participation"]=@"(?:השתתפות עובד ברכב|השתתפות ברכב|employee car participation)"};
     private const string Number=@"(?:\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)";
-    private static string Normalize(string text)=>Regex.Replace(new string(text.Normalize(NormalizationForm.FormKC)
+    internal static string Normalize(string text)=>Regex.Replace(new string(text.Normalize(NormalizationForm.FormKC)
         .Where(c=>char.GetUnicodeCategory(c) is not (UnicodeCategory.Format or UnicodeCategory.NonSpacingMark)).ToArray()),@"\s+"," ").Trim();
-    private static string ReverseVisual(string text)=>Regex.Replace(new string(text.Reverse().ToArray()),@"\d[\d,.]*",m=>new string(m.Value.Reverse().ToArray()));
+    internal static string ReverseVisual(string text)=>Regex.Replace(new string(text.Reverse().ToArray()),@"\d[\d,.]*",m=>new string(m.Value.Reverse().ToArray()));
     public static PayslipResult Extract(IEnumerable<LocalTextLine> lines,int minimumConfidence,long revision,string source,CancellationToken ct=default)
     {
         var found=Patterns.Keys.ToDictionary(key=>key,_=>new HashSet<decimal>());
@@ -36,7 +36,7 @@ public static class LocalPayrollFields
                     // Only a complete, explicitly labelled row with one value is eligible. Names,
                     // account details, gross totals and multi-column deduction rows cannot match.
                     var amount=@"(?<amount>"+Number+@")\s*(?<unit>%|₪|ש[\""״]?ח|NIS|ILS)?";
-                    var match=Regex.Match(text,@"^(?:"+label+@"\s*[:=|\-]?\s*"+amount+@"|"+amount+@"\s*[:=|\-]?\s*"+label+@")$",
+                    var match=Regex.Match(text,@"^(?:"+label+@"\s*[:=|]?\s*"+amount+@"|"+amount+@"\s*[:=|]?\s*"+label+@")$",
                         RegexOptions.IgnoreCase|RegexOptions.CultureInvariant,TimeSpan.FromMilliseconds(100));
                     if(!match.Success||!decimal.TryParse(match.Groups["amount"].Value.Replace(",",""),NumberStyles.AllowDecimalPoint,CultureInfo.InvariantCulture,out var value))continue;
                     var percent=key is "pension" or "fund";
@@ -44,6 +44,27 @@ public static class LocalPayrollFields
                     found[key].Add(value);
                 }
         }
+        return Result(found,revision,source);
+    }
+    public static PayslipResult Merge(IEnumerable<PayslipResult> results,long revision,string source)
+    {
+        var materialized=results.ToArray();
+        var found=Patterns.Keys.ToDictionary(key=>key,_=>new HashSet<decimal>());
+        foreach(var result in materialized)foreach(var (key,field) in result.Fields)
+            if(field.Value is {} value)found[key].Add(value);
+        // A conflict detected in an earlier pass must remain a conflict in later passes.
+        var merged=Result(found,revision,source);
+        foreach(var key in Patterns.Keys)
+            if(materialized.Any(r=>r.Warnings.Any(w=>w.StartsWith(Labels[key]+": נמצאו ערכים סותרים",StringComparison.Ordinal))))
+            {
+                merged.Fields[key]=new(null,null);
+                var warning=Labels[key]+": נמצאו ערכים סותרים. השדה נשאר ריק לבדיקה ידנית.";
+                if(!merged.Warnings.Contains(warning))merged.Warnings.Add(warning);
+            }
+        return merged;
+    }
+    internal static PayslipResult Result(Dictionary<string,HashSet<decimal>> found,long revision,string source)
+    {
         var warnings=new List<string>();var fields=new Dictionary<string,PayslipField>();
         foreach(var (key,values) in found)
         {

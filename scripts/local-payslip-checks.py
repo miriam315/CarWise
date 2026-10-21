@@ -1,5 +1,6 @@
 """Synthetic local OCR integration checks. Never uses a real payslip or paid AI API."""
 from io import BytesIO
+from zipfile import ZipFile
 from copy import deepcopy
 import json
 from PIL import Image, ImageDraw, ImageFont
@@ -53,9 +54,14 @@ def check(page,query,upload,nav,screenshots):
   assert len(query('/admin/usage')['items'])==len(usage_before)
   before=query('/conversation/E-001')['employee']
   page.reload();page.wait_for_selector('.vehicle-card');nav('הנתונים שלי')
-  page.get_by_label('העלאת תלוש שכר').set_input_files({'name':'synthetic-private-payslip.pdf','mimeType':'application/pdf','buffer':pdf})
+  with ZipFile(screenshots.parent.parent/'examples/payslips/complex/CarWise-complex-demo-payslips.zip') as archive:
+   dense=archive.read(next(name for name in archive.namelist() if name.endswith('/01-complex-monthly.pdf') or name=='01-complex-monthly.pdf'))
+  page.get_by_label('העלאת תלוש שכר').set_input_files({'name':'synthetic-dense-payslip.pdf','mimeType':'application/pdf','buffer':dense})
   page.locator('.payslip-consent input').check();page.get_by_role('button',name='חילוץ נתונים מהתלוש',exact=True).click()
   expect(page.get_by_label('חילוץ שכר בסיס חודשי (₪)',exact=True)).to_have_value('19000.25',timeout=30000)
+  expect(page.locator('.payslip-review [role=status]')).to_contain_text('זוהו 7 מתוך 7 שדות')
+  for label,value in [('עמלות חודשיות (₪)','1000'),('בונוס חודשי (₪)','0'),('פנסיית עובד (%)','6'),('קרן השתלמות עובד (%)','2.5'),('נקודות זיכוי','2.25'),('השתתפות עובד ברכב (₪)','350')]:
+   expect(page.get_by_label('חילוץ '+label,exact=True)).to_have_value(value)
   expect(page.get_by_label('תצוגה מקדימה של התלוש',exact=True)).to_be_visible()
   expect(page.get_by_role('button',name='העמוד הבא',exact=True)).to_be_disabled()
   assert query('/conversation/E-001')['employee']['salary']==before['salary'] # Extraction is read-only.
@@ -63,6 +69,7 @@ def check(page,query,upload,nav,screenshots):
   page.get_by_role('button',name='אישור והעברת השדות המסומנים לטופס').click()
   expect(page.locator('.payslip-panel [role=alert]')).to_contain_text('סמנו לפחות שדה אחד')
   page.get_by_label('חילוץ שכר בסיס חודשי (₪)',exact=True).fill('19000.55')
+  expect(page.locator('.payslip-review')).to_contain_text('תוקן ידנית. הערך שהוצע: 19000.25')
   page.get_by_label('אישור שכר בסיס חודשי (₪)',exact=True).check()
   page.screenshot(path=str(screenshots/'payslip-local-review.png'),full_page=True)
   page.get_by_role('button',name='אישור והעברת השדות המסומנים לטופס').click()
@@ -104,5 +111,5 @@ def check(page,query,upload,nav,screenshots):
   current=query('/admin/configuration')
   restored=query('/admin/restore',{'expectedRevision':current['revision'],'revision':baseline['revision'],'note':'restore after synthetic local OCR verification'})
  page.reload();page.wait_for_selector('.vehicle-card')
- print('PASS: real local digital PDF, scanned PDF, PNG and JPEG; strict fields without personal excerpts, no AI usage; explicit review, decimal DB persistence and reload; camera capture/retake/denial/track cleanup.')
+ print('PASS: real local digital PDF, scanned PDF, PNG and JPEG; strict fields without personal excerpts, no AI usage; dense seven-field PDF review, visible coverage and correction, decimal DB persistence and reload; camera capture/retake/denial/track cleanup.')
  return restored['revision']

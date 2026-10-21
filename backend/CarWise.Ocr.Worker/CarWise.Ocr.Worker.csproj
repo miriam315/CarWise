@@ -3,6 +3,7 @@
   <ItemGroup><FrameworkReference Include="Microsoft.AspNetCore.App"/></ItemGroup>
   <ItemGroup>
     <Compile Include="../CarWise.Api/AI/LocalPayslipOcr.cs" Link="LocalPayslipOcr.cs"/>
+    <Compile Include="../CarWise.Api/AI/LocalPayrollLayout.cs" Link="LocalPayrollLayout.cs"/>
     <Compile Include="../CarWise.Api/AI/LocalPayrollFields.cs" Link="LocalPayrollFields.cs"/>
     <Compile Include="../CarWise.Api/AI/LocalImageLimits.cs" Link="LocalImageLimits.cs"/>
     <Compile Include="../CarWise.Api/AI/AiDocument.cs" Link="AiDocument.cs"/>

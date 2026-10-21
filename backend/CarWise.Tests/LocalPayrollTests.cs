@@ -17,7 +17,7 @@ public sealed class LocalPayrollTests
         Assert.Equal(2.5m,result.Fields["fund"].Value);Assert.Equal(2.75m,result.Fields["credits"].Value);Assert.Equal(350,result.Fields["participation"].Value);
     }
     [Theory][InlineData("שכר ברוטו: 19000")][InlineData("שכר נטו: 14000")][InlineData("פנסיה מעסיק: 6.5%")]
-    [InlineData("פנסיית עובד: 1170")][InlineData("פנסיית עובד: 6.5% מעסיק 7.5%")][InlineData("שכר בסיס: -1000")]
+    [InlineData("פנסיית עובד: 1170")][InlineData("פנסיית עובד: 6.5% מעסיק 7.5%")][InlineData("שכר בסיס: -1000")][InlineData("שכר בסיס -1000")]
     [InlineData("שכר בסיס: 200001")][InlineData("שכר בסיס: 19000 תעודת זהות 123456789")][InlineData("מס עובד 123 שכר בסיס 19000")]
     [InlineData("שכר בסיס מצטבר: 100000")][InlineData("שכר בסיס: 19000 20 950")]
     public void AmbiguousOrUnrelatedNumbersCannotBecomePayrollFields(string text)
