@@ -1,0 +1,85 @@
+{
+  "date": "2026-10-21",
+  "scope": "Required challenge conversation, missing-data handling, representative handoff and bounded response time",
+  "baseCommit": "2d47e38457a05d1258dd71ba20c0283bd7911eab",
+  "checks": [
+    {
+      "command": "npm run build",
+      "status": "passed"
+    },
+    {
+      "command": "CARWISE_VERIFY_OCR=true npm test",
+      "passed": 192,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "command": "python3 scripts/smoke.py",
+      "status": "passed",
+      "coverage": [
+        "PostgreSQL-backed stepwise intake",
+        "explicit zero versus missing",
+        "stale client profile does not overwrite saved answers",
+        "current-vehicle confirmation and saved candidate buttons after reload",
+        "automatic current/new participation questions",
+        "idempotent pending ticket",
+        "null pending financial results",
+        "catalogue selection automatically asks representative",
+        "open comparison refreshes after approval",
+        "browser form blanks for unknown data",
+        "legacy reference scenarios, rules and calculator",
+        "local document preview, camera and isolated OCR"
+      ]
+    },
+    {
+      "command": "python3 scripts/supabase-smoke.py",
+      "status": "passed",
+      "coverage": [
+        "actual local PostgREST adapter",
+        "persisted intake in existing JSON fields",
+        "authenticated new employee completes only missing fields",
+        "role isolation",
+        "agent approval and conversation resume",
+        "connection bootstrap and encrypted saved settings",
+        "server restart from saved connection"
+      ]
+    },
+    {
+      "check": "Slow AI and database unit tests",
+      "status": "passed",
+      "limitsSeconds": {
+        "chatService": 50,
+        "chatHttpIncludingAuthentication": 55,
+        "extraction": 15,
+        "narration": 12
+      },
+      "notes": "Shorter injected budgets test cancellation and deterministic fallback. Limits are application budgets, not a production network SLA."
+    }
+  ],
+  "localChatTiming": {
+    "requestsPerAcceptanceRun": 14,
+    "maximumObservedPostgresSeconds": 0.01,
+    "maximumObservedPostgrestSeconds": 0.03,
+    "syntheticDataOnly": true,
+    "conversationAiEnabled": false
+  },
+  "liveProviderProbe": {
+    "provider": "openai",
+    "model": "gpt-4.1-mini",
+    "date": "2026-10-21",
+    "status": "rejected",
+    "httpStatus": 429,
+    "providerCode": "credit_balance_exhausted",
+    "elapsedSeconds": 2.7515058,
+    "syntheticDataOnly": true,
+    "successfulCompletion": false,
+    "note": "The real adapter reached the provider; a complete live model scenario remains unverified until API balance is available. No key or request content is included."
+  },
+  "databaseUpgrade": "No schema migration: KnownFields and AdvisorState use existing employee JSON columns. Old profiles with all numeric fields supplied remain compatible.",
+  "remainingLimits": [
+    "Complex payslip OCR remains insufficient and optional for challenge compliance",
+    "Live provider completion not verified due to credit balance",
+    "Multiple API instances need conversation version conflict control",
+    "Existing pilot security/retention roadmap still applies"
+  ]
+}

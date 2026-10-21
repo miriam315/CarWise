@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
 namespace CarWise.Api.Domain;
 
 public static class JsonDefaults
@@ -14,22 +15,25 @@ public sealed record Employee
     public required string Name { get; init; }
     public required string Occupation { get; init; }
     public string Group { get; init; } = "";
-    public decimal Salary { get; init; }
-    public decimal Commission { get; init; }
-    public decimal Bonus { get; init; }
-    public decimal Pension { get; init; }
-    public decimal Fund { get; init; }
-    public decimal Credits { get; init; }
-    public decimal Children { get; init; }
-    public string? CurrentCar { get; init; }
-    public decimal Participation { get; init; }
+    [JsonRequired] public decimal Salary { get; init; }
+    [JsonRequired] public decimal Commission { get; init; }
+    [JsonRequired] public decimal Bonus { get; init; }
+    [JsonRequired] public decimal Pension { get; init; }
+    [JsonRequired] public decimal Fund { get; init; }
+    [JsonRequired] public decimal Credits { get; init; }
+    [JsonRequired] public decimal Children { get; init; }
+    [JsonRequired] public string? CurrentCar { get; init; }
+    public string[]? KnownFields {get;init;}
+    public AdvisorState? AdvisorState {get;init;}
+    [JsonRequired] public decimal Participation { get; init; }
     public string CurrentModel { get; init; } = "";
     public string Question { get; init; } = "";
 }
 public sealed record Car(string Id, string Group, string Brand, string MakerCode, string Model,
     string ModelCode, string Description, int Year, string Drive, decimal Price, decimal Value,
-    decimal Cost, decimal Participation)
+    decimal Cost, [property:JsonRequired] decimal Participation)
 {
+    public bool ParticipationKnown {get;init;}=true;
     public decimal OfficialValue { get; init; }
     public string[] OfficialKey { get; init; } = [];
 }
@@ -77,7 +81,7 @@ public sealed record AnswerRequest(decimal Participation, string Answer);
 public sealed record ChatRequest(Employee Employee, string Text, string? Target, Dictionary<string, decimal>? Overrides);
 public sealed record Ticket(Guid Id, string EmployeeId, Employee Snapshot, string Target, string Question,
     string Status, string? Answer, decimal? Participation, DateTimeOffset Created);
-public sealed record Message(string Role, string Text);
+public sealed record Message(string Role, string Text,IReadOnlyList<string>? Candidates=null);
 public sealed record Conversation(Employee Employee, string Status, string? Target);
 public sealed record DatabaseSnapshot(JsonNode Rules, List<Car> Cars, List<Employee> Employees,
     List<Dictionary<string, JsonElement>> Occupations, List<OfficialRecord> Official);

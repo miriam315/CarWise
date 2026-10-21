@@ -154,6 +154,9 @@ catch(Exception)
 app.UseRateLimiter();
 app.Use(async(context,next)=>
 {
+    var originalCancellation=context.RequestAborted;
+    using var chatDeadline=context.Request.Path=="/api/chat"?CancellationTokenSource.CreateLinkedTokenSource(originalCancellation):null;
+    if(chatDeadline is not null){chatDeadline.CancelAfter(TimeSpan.FromSeconds(55));context.RequestAborted=chatDeadline.Token;}
     context.Response.Headers["X-Content-Type-Options"]="nosniff";
     context.Response.Headers["X-Frame-Options"]="DENY";
     context.Response.Headers.ContentSecurityPolicy="frame-ancestors 'none'";
@@ -176,15 +179,19 @@ app.Use(async(context,next)=>
     {
         context.Response.StatusCode=400;await context.Response.WriteAsJsonAsync(new{error=error is ArgumentException?error.Message:"בקשה לא תקינה"});
     }
-    catch(Exception error) when(error is AiUnavailableException or HttpRequestException or TaskCanceledException)
+    catch(OperationCanceledException)when(originalCancellation.IsCancellationRequested){}
+    catch(Exception error) when(error is AiUnavailableException or HttpRequestException or OperationCanceledException)
     {
-        context.Response.StatusCode=503;await context.Response.WriteAsJsonAsync(new{error="שירות ה־AI אינו זמין. אפשר לבחור רכב ישירות מהקטלוג ולעדכן נתונים בטופס."});
+        context.RequestAborted=originalCancellation;
+        app.Logger.LogWarning("Service operation failed: {ErrorType}, {TransportCategory}",error.GetType().Name,error is HttpRequestException transport?transport.HttpRequestError.ToString():"not-transport");
+        context.Response.StatusCode=503;await context.Response.WriteAsJsonAsync(new{error=chatDeadline?.IsCancellationRequested==true?"הבקשה לא הושלמה בתוך מגבלת הזמן. לא מוצג חישוב סופי; אפשר לנסות שוב.":"השירות אינו זמין כרגע. אפשר לבחור רכב מהקטלוג או לנסות שוב מאוחר יותר."});
     }
     catch(Exception error)
     {
         app.Logger.LogError("Request failed with {ErrorType}",error.GetType().Name);
         context.Response.StatusCode=500;await context.Response.WriteAsJsonAsync(new{error="אירעה שגיאת שרת. פרטי התקלה נשמרו בשרת ללא חשיפת נתונים."});
     }
+    finally{context.RequestAborted=originalCancellation;}
 });
 app.MapGet("/api/runtime",(IDataExtractionService extraction)=>new{server="ASP.NET Core 10",database=repository.Provider,demoMode=demo,aiMode=extraction.Mode,authenticationRequired=!demo,configurationRevision=state.Current.Document.Revision,requiresSetup=false,instanceId=ServerInstance.Id});
 app.MapGet("/api/health",async(ReferenceData current,CancellationToken ct)=>
@@ -216,11 +223,18 @@ void AuthorizeEmployee(HttpContext context,AccessControl access,Employee employe
 app.MapPost("/api/profile",async(SimulateRequest request,HttpContext context,AccessControl access,PayrollEngine engine,CancellationToken ct)=>
 {
     AuthorizeEmployee(context,access,request.Employee);
-    var employee=engine.Validate(request.Employee);await repository.SaveConversationAsync(employee,null,ct);return employee;
+    var previous=await repository.ConversationAsync(request.Employee.Id,ct);
+    var employee=engine.Validate(request.Employee with{AdvisorState=previous?.Employee.AdvisorState});
+    if(employee.AdvisorState is {} state)employee=employee with{AdvisorState=state with{AwaitingField=IntakeFields.Missing(employee).FirstOrDefault()}};
+    await repository.SaveConversationAsync(employee,employee.AdvisorState?.Target,ct);return employee;
 });
-app.MapPost("/api/simulate",async(SimulateRequest request,HttpContext context,AccessControl access,AdvisorService advisor,CancellationToken ct)=>
+app.MapPost("/api/simulate",async(SimulateRequest request,HttpContext context,AccessControl access,AdvisorService advisor,PayrollEngine engine,CancellationToken ct)=>
 {
-    AuthorizeEmployee(context,access,request.Employee);return await advisor.SimulateAsync(request.Employee,ct);
+    AuthorizeEmployee(context,access,request.Employee);
+    var employee=await advisor.RefreshKnownParticipationAsync(request.Employee,ct);
+    employee=engine.Validate(employee);
+    if(IntakeFields.Missing(employee).Length>0)return SimulationView.Incomplete(employee);
+    return SimulationView.Complete(await advisor.SimulateAsync(employee,ct));
 });
 app.MapGet("/api/tickets",async(HttpContext context,CancellationToken ct)=>
 {
@@ -228,9 +242,15 @@ app.MapGet("/api/tickets",async(HttpContext context,CancellationToken ct)=>
     var list=await repository.TicketsAsync(demo||caller?.IsAgent==true?null:caller!.EmployeeId,ct);
     return list.Select(TicketView);
 });
-app.MapGet("/api/history/{employee}",async(string employee,HttpContext context,AccessControl access,CancellationToken ct)=>
+app.MapGet("/api/history/{employee}",async(string employee,HttpContext context,AccessControl access,ReferenceData reference,CancellationToken ct)=>
 {
-    access.Employee(context,employee);return await repository.HistoryAsync(employee,ct);
+    access.Employee(context,employee);var messages=await repository.HistoryAsync(employee,ct);
+    var saved=await repository.ConversationAsync(employee,ct);var state=saved?.Employee.AdvisorState;
+    var candidates=state?.AwaitingField=="currentCar"?reference.Cars.Select(car=>car.Id).ToArray():
+        saved is not null&&IntakeFields.Missing(saved.Employee).Length==0?state?.CandidateIds:null;
+    var last=messages.FindLastIndex(message=>message.Role=="assistant");
+    if(last>=0&&candidates is {Length:>0})messages[last]=messages[last] with{Candidates=candidates.Where(id=>id=="waiver"||reference.Cars.Any(car=>car.Id==id)).ToArray()};
+    return messages;
 });
 app.MapGet("/api/conversation/{employee}",async(string employee,HttpContext context,AccessControl access,CancellationToken ct)=>
 {
@@ -242,9 +262,12 @@ app.MapPost("/api/chat",async(ChatRequest request,HttpContext context,AccessCont
 });
 app.MapPost("/api/tickets",async(TicketRequest request,HttpContext context,AccessControl access,PayrollEngine engine,ReferenceData reference,CancellationToken ct)=>
 {
-    AuthorizeEmployee(context,access,request.Employee);var e=engine.Validate(request.Employee);
+    AuthorizeEmployee(context,access,request.Employee);
+    var stored=await repository.ConversationAsync(request.Employee.Id,ct);
+    var e=engine.Validate(request.Employee with{AdvisorState=stored?.Employee.AdvisorState});IntakeFields.RequireComplete(e);
     var car=reference.Cars.SingleOrDefault(c=>c.Id==request.Target)??throw new ArgumentException("בחרו רכב מתוך הקטלוג");
     if(!engine.Eligibility(e,car).Eligible)throw new ArgumentException("אין זכאות לרכב המבוקש");
+    e=e with{AdvisorState=new("targetParticipation",car.Id,car.Drive=="חשמלי")};
     var question=request.Question?.Trim()??"מהי השתתפות העובד המאושרת ברכב החדש?";
     if(question.Length is 0 or >2000)throw new ArgumentException("יש להזין שאלה עד 2,000 תווים");
     var t=await repository.CreateTicketAsync(e,car.Id,question,ct);return new{id=t.Id,status=t.Status};
@@ -259,6 +282,15 @@ app.MapPost("/api/tickets/{id:guid}",async(Guid id,AnswerRequest request,HttpCon
     var conversation=await repository.ConversationAsync(ticket.EmployeeId,ct);
     var e=conversation?.Employee??ticket.Snapshot;
     var engine=context.RequestServices.GetRequiredService<PayrollEngine>();
+    if((!IntakeFields.Known(e,"participation")||ticket.Snapshot.AdvisorState?.AwaitingField=="participation")&&e.CurrentCar==ticket.Target)
+    {
+        e=IntakeFields.Answer(e,"participation",request.Participation);
+        e=e with{AdvisorState=(e.AdvisorState??new()) with{AwaitingField=IntakeFields.Missing(e).FirstOrDefault()}};
+        var message=$"הנציג ענה: {request.Answer.Trim()}\nההשתתפות ברכב הנוכחי עודכנה ל־{FinancialText.Number(request.Participation)} ₪. אפשר להמשיך בשיחה ובהשוואה.";
+        await repository.ResolveAsync(id,request.Participation,request.Answer.Trim(),message,ct);
+        await repository.SaveConversationAsync(e,e.AdvisorState.Target,ct);
+        return Results.Ok(new{status="resolved"});
+    }
     var current=engine.Simulate(e,new Dictionary<string,decimal>{{ticket.Target,request.Participation}});
     var r=current.Results.Single(r=>r.Id==ticket.Target);
     if(!r.Eligible)throw new ArgumentException("הזכאות השתנתה; יש לעדכן את פרטי העובד לפני אישור ההשתתפות");

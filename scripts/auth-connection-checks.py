@@ -40,13 +40,24 @@ def check(base,query,settings,service_token):
   page.get_by_role('tab',name='חשבונות והרשאות',exact=True).click();page.get_by_label('דוא״ל לחשבון חדש').fill('employee@example.test');page.get_by_label('סיסמה לחשבון חדש').fill('TEST-ONLY-EMPLOYEE-PASSWORD-123');page.get_by_label('פרופיל לחשבון חדש').select_option(new_employee);page.get_by_role('button',name='יצירת חשבון',exact=True).click();expect(page.locator('.admin-success').filter(has_text='החשבון נוצר')).to_be_visible()
   accounts=authorized('/admin/accounts',admin)['items'];worker=next(u for u in accounts if u['email']=='employee@example.test')
   authorized('/admin/accounts/'+worker['id']+'/password',admin,{'password':'TEST-ONLY-NEW-PASSWORD-123'})
-  page.get_by_role('button',name='יציאה מהחשבון',exact=True).click();expect(page.get_by_role('heading',name='נכנסים לדרך שלך.')).to_be_visible();page.get_by_label('דוא״ל להתחברות',exact=True).fill('employee@example.test');page.get_by_label('סיסמה להתחברות',exact=True).fill('TEST-ONLY-NEW-PASSWORD-123');page.get_by_role('button',name='כניסה למערכת',exact=True).click();page.wait_for_selector('.vehicle-card')
+  page.get_by_role('button',name='יציאה מהחשבון',exact=True).click();expect(page.get_by_role('heading',name='נכנסים לדרך שלך.')).to_be_visible();page.get_by_label('דוא״ל להתחברות',exact=True).fill('employee@example.test');page.get_by_label('סיסמה להתחברות',exact=True).fill('TEST-ONLY-NEW-PASSWORD-123');page.get_by_role('button',name='כניסה למערכת',exact=True).click();expect(page.get_by_role('heading',name='נשלים רק את מה שחסר.')).to_be_visible()
   employee=page.evaluate("sessionStorage.getItem('carwise-access-token')");own=authorized('/data',employee);assert len(own['employees'])==1 and own['employees'][0]['id']==new_employee and not own['canAdmin'] and not own['canAgent']
   expect(page.locator('.sidebar nav').get_by_role('button',name='ניהול המערכת',exact=False)).to_have_count(0);expect(page.locator('.sidebar nav').get_by_role('button',name='מרכז הנציגים',exact=False)).to_have_count(0)
   denied('/conversation/E-002',employee,403);denied('/admin/configuration',employee,403);denied('/admin/server-connection',employee,403)
   denied('/payslip/extract?employee=E-002&consent=true',employee,403,{})
   denied('/payslip/status','invalid-user-token',401)
   denied('/data','invalid-user-token',401)
+  # A real employee session completes only fields the administrator did not confirm.
+  page.get_by_role('button',name='השלמת נתונים בשיחה',exact=True).click()
+  expect(page.locator('.message.assistant').last).to_contain_text('עמלות')
+  for answer in ['0','0','0','0','ללא רכב']:
+   page.get_by_label('הודעה ליועץ').fill(answer);page.get_by_role('button',name='שליחת הודעה',exact=True).click()
+   expect(page.locator('.typing')).to_have_count(0)
+  expect(page.get_by_role('heading',name='נשלים רק את מה שחסר.')).to_have_count(0)
+  page.locator('.sidebar nav').get_by_role('button',name='הסקירה שלי',exact=False).click();page.wait_for_selector('.vehicle-card')
+  completed=authorized('/conversation/'+new_employee,employee)['employee']
+  assert completed['salary']==18000 and completed['pension']==6 and completed['currentCar'] is None and completed['participation']==0
+
   screenshots=Path(__file__).resolve().parent.parent/'.local/screenshots';screenshots.mkdir(parents=True,exist_ok=True)
   page.get_by_role('button',name='יציאה מהחשבון',exact=True).click();page.get_by_role('tab',name='כניסת מנהל',exact=True).click();page.screenshot(path=str(screenshots/'admin-login.png'),full_page=True)
   page.get_by_label('דוא״ל להתחברות',exact=True).fill('admin@example.test');page.get_by_label('סיסמה להתחברות',exact=True).fill('TEST-ONLY-ADMIN-PASSWORD-123');page.get_by_role('button',name='כניסה למערכת',exact=True).click();page.wait_for_selector('.admin-page');admin=page.evaluate("sessionStorage.getItem('carwise-access-token')")

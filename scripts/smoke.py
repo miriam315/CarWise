@@ -45,6 +45,7 @@ with tempfile.TemporaryDirectory(prefix='carwise-smoke-') as temp:
  try:
   from importlib.machinery import SourceFileLoader
   admin_revision=SourceFileLoader('admin_checks',str(ROOT/'scripts/admin-checks.py')).load_module().check_admin(request,dbname,upload_api)
+  SourceFileLoader('challenge_checks',str(ROOT/'scripts/challenge-flow-checks.py')).load_module().check(request,dbname)
   data=request('/data');assert data['officialCount']==77988
   employee=data['employees'][0]
   runtime=request('/runtime');assert runtime['server']=='ASP.NET Core 10' and runtime['database']=='PostgreSQL'
@@ -179,6 +180,7 @@ with tempfile.TemporaryDirectory(prefix='carwise-smoke-') as temp:
    admin_revision=request('/admin/configuration')['revision']
    page.screenshot(path=str(screenshots/'official-versions.png'),full_page=True)
    admin_revision=SourceFileLoader('ai_model_checks',str(ROOT/'scripts/ai-model-checks.py')).load_module().check(page,request,nav,screenshots)
+   SourceFileLoader('challenge_ui_checks',str(ROOT/'scripts/challenge-ui-checks.py')).load_module().check(page,request,nav,screenshots,dbname)
    admin_revision=SourceFileLoader('local_payslip_checks',str(ROOT/'scripts/local-payslip-checks.py')).load_module().check(page,request,upload_api,nav,screenshots)
    nav('הסקירה שלי')
    page.set_viewport_size({'width':390,'height':844});page.wait_for_timeout(350);page.screenshot(path=str(screenshots/'mobile.png'),full_page=True)

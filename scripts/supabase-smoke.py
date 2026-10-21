@@ -80,7 +80,9 @@ try:
      self.send_response(response.code);self.send_header('Content-Type','application/json');self.send_header('Content-Length',str(len(content)));
      if response.headers.get('Content-Range'):self.send_header('Content-Range',response.headers['Content-Range'])
      self.end_headers();self.wfile.write(content)
-  proxy=ThreadingHTTPServer(('127.0.0.1',55434),Gateway);Thread(target=proxy.serve_forever,daemon=True).start()
+  class FixtureServer(ThreadingHTTPServer):
+   request_queue_size=128
+  proxy=FixtureServer(('127.0.0.1',55434),Gateway);Thread(target=proxy.serve_forever,daemon=True).start()
   env.update({'SUPABASE_URL':'http://127.0.0.1:55434' ,'CARWISE_SUPABASE_KEY':service_token,'ASPNETCORE_URLS':base})
   with (ROOT/'.local/rest-smoke-server.log').open('w') as log:
    process=subprocess.Popen(['node','scripts/dotnet.mjs','run','--project','backend/CarWise.Api','--no-launch-profile','--no-build'],cwd=ROOT,env=env,stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
@@ -93,6 +95,7 @@ try:
    assert query('/runtime')['database']=='Supabase/PostgreSQL'
    from importlib.machinery import SourceFileLoader
    SourceFileLoader('admin_checks',str(ROOT/'scripts/admin-checks.py')).load_module().check_admin(query,name,upload_api)
+   SourceFileLoader('challenge_checks_rest',str(ROOT/'scripts/challenge-flow-checks.py')).load_module().check(query,name)
    data=query('/data');assert data['officialCount']==77988
    e=data['employees'][0];r=query('/simulate',{'employee':e});a=next(r for r in r['results'] if r['id']=='CAR-10');assert round(a['net'])==11693
    ticket=query('/tickets',{'employee':e,'target':'CAR-10','question':'בדיקת ההשתתפות דרך Supabase adapter'})

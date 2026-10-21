@@ -10,6 +10,7 @@ public sealed class PayrollEngine(ReferenceData data)
     public Employee Validate(Employee e)
     {
         if(string.IsNullOrWhiteSpace(e.Id) || e.Id.Length>100 || e.Name.Length>100) throw new ArgumentException("מזהה עובד חסר או לא תקין");
+        IntakeFields.ValidateKnowledge(e);
         var o=data.OccupationFor(e.Occupation);
         foreach(var (value,max,name) in new[]{(e.Salary,200000m,"salary"),(e.Commission,200000m,"commission"),
             (e.Bonus,200000m,"bonus"),(e.Pension,20m,"pension"),(e.Fund,20m,"fund"),(e.Credits,30m,"credits"),
@@ -17,7 +18,7 @@ public sealed class PayrollEngine(ReferenceData data)
             if(value<0 || value>max) throw new ArgumentException("נתון מחוץ לטווח: "+name);
         if(decimal.Truncate(e.Children)!=e.Children) throw new ArgumentException("מספר הילדים חייב להיות שלם");
         if(e.CurrentCar is not null && !data.Cars.Any(c=>c.Id==e.CurrentCar)) throw new ArgumentException("הרכב הנוכחי אינו בקטלוג");
-        if(e.CurrentCar is null && !o.Waiver) throw new ArgumentException("בעיסוק זה נדרש רכב נוכחי");
+        if(IntakeFields.Known(e,"currentCar") && e.CurrentCar is null && !o.Waiver) throw new ArgumentException("בעיסוק זה נדרש רכב נוכחי");
         return e with {Group=o.Group};
     }
     public (bool Eligible,string Reason) Eligibility(Employee e,Car? car)
@@ -36,6 +37,7 @@ public sealed class PayrollEngine(ReferenceData data)
     }
     public Amounts Calculate(Employee employee,Car? car,decimal? participation=null)
     {
+        IntakeFields.RequireComplete(employee);
         var e=Validate(employee); var occupation=data.OccupationFor(e.Occupation);
         var gross=e.Salary+e.Commission+e.Bonus;
         var maintenance=car is null?occupation.Maintenance:0m;var value=car is null?0m:data.Lookup(car).Value;
@@ -43,6 +45,7 @@ public sealed class PayrollEngine(ReferenceData data)
         if(data.Rules["waiver"]!["maintenanceIsPensionable"]!.GetValue<bool>())contributions+=maintenance;
         var pension=contributions*e.Pension/100m;var fund=contributions*e.Fund/100m;
         var taxableMaintenance=data.Rules["waiver"]!["maintenanceIsTaxable"]!.GetValue<bool>()?maintenance:0m;
+        if(car is {ParticipationKnown:false}&&participation is null)throw new ArgumentException("סכום ההשתתפות אינו ידוע; נדרש אישור נציג לפני חישוב.");
         var part=car is null?0m:participation??car.Participation;
         if(part<0 || part>20000) throw new ArgumentException("השתתפות לא תקינה");
         var budget=Number(data.Rules["budgets"]![occupation.Group]);
@@ -91,6 +94,7 @@ public sealed class PayrollEngine(ReferenceData data)
     }
     public Simulation Simulate(Employee employee,IReadOnlyDictionary<string,decimal>? overrides=null,IReadOnlySet<string>? pending=null)
     {
+        IntakeFields.RequireComplete(employee);
         var e=Validate(employee);var currentCar=data.Cars.SingleOrDefault(c=>c.Id==e.CurrentCar);
         var before=Calculate(e,currentCar,e.Participation);var results=new List<Alternative>();
         foreach(var car in data.Cars.Cast<Car?>().Append(null))
@@ -98,6 +102,7 @@ public sealed class PayrollEngine(ReferenceData data)
             var id=car?.Id??"waiver";var (ok,reason)=Eligibility(e,car);
             if(!ok){results.Add(new(){Id=id,Car=car is null?null:data.Enrich(car),Eligible=false,Reason=reason});continue;}
             decimal? part=overrides?.TryGetValue(id,out var p)==true?p:null;
+            if(car is {ParticipationKnown:false} && part is null){results.Add(new(){Id=id,Car=data.Enrich(car),Eligible=true,Pending=true,Budget=Number(data.Rules["budgets"]![e.Group]),Cost=car.Cost,Value=data.Lookup(car).Value,Reason="סכום ההשתתפות אינו ידוע; נדרש אישור נציג"});continue;}
             var values=Calculate(e,car,part);
             results.Add(new(values){Id=id,Car=car is null?null:data.Enrich(car),Eligible=true,Reason=reason,
                 Delta=values.Net-before.Net,Annual=(values.Net-before.Net)*12m,Pending=pending?.Contains(id)==true});
