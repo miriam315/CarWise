@@ -46,6 +46,12 @@ def check(base,query,settings,service_token):
   denied('/conversation/E-002',employee,403);denied('/admin/configuration',employee,403);denied('/admin/server-connection',employee,403)
   denied('/payslip/extract?employee=E-002&consent=true',employee,403,{})
   denied('/decision/state/E-002',employee,403)
+  denied('/fleet/state/E-002',employee,403);denied('/fleet/status/E-002',employee,403);denied('/fleet/officer',employee,403)
+  for endpoint in ['request','propose','withdraw','consent']:
+   denied('/fleet/'+endpoint,employee,403,{'expectedRevision':0,'employeeId':'E-002','category':'family','consent':True,'id':'00000000-0000-0000-0000-000000000000'})
+  denied('/fleet/handover',employee,403,{'expectedRevision':0,'id':'00000000-0000-0000-0000-000000000000','handoverOn':'2026-10-21','note':'forged handover'})
+  denied('/fleet/decision',employee,403,{'expectedRevision':0,'id':'00000000-0000-0000-0000-000000000000','approve':True,'note':'forged officer'})
+  denied('/fleet/assignment',employee,403,{'expectedRevision':0,'id':'FORGED','employeeId':new_employee,'carId':'CAR-09','assignedOn':'2025-01-01','leaseEndsOn':None,'earlyReturnFee':None,'transferAllowed':True})
   other={**own['employees'][0],'id':'E-002'}
   denied('/decision/analyze',employee,403,{'employee':other,'target':'CAR-10'})
   denied('/decision/choice',employee,403,{'employee':other,'expectedRevision':0,'target':'CAR-10'})

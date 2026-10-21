@@ -9,6 +9,7 @@ public sealed class ConfigurationValidator(ReferenceData officialSource)
     {
         try
         {
+            FleetRules.Validate(config.Fleet);
             if(JsonDefaults.Serialize(config).Length>1_000_000)Fail("קובץ ההגדרות גדול מדי");
             if(config.Cars.Count is <1 or >500 || config.Occupations.Count is <1 or >500 || config.Employees.Count is <1 or >5000)
                 Fail("נדרשים קטלוג, עיסוקים ועובדים; הרשימות חורגות מהגודל המותר");

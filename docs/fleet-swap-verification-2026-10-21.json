@@ -1,0 +1,37 @@
+{
+  "verifiedAtUtc": "2026-10-21T19:23:07+00:00",
+  "baseCommit": "662f81ffaadec1fdca78e5f1235a932fdfcfbdd5",
+  "unitTests": {
+    "passed": 237,
+    "failed": 0,
+    "skipped": 0,
+    "newFleetCases": 18
+  },
+  "suites": {
+    "dotnet": "passed",
+    "fleetBrowserAndRestart": "passed",
+    "supabaseAdapterAndPermissions": "passed",
+    "legacyBrowser": "passed",
+    "sixDecisionToolsRegression": "passed"
+  },
+  "fleetCases": [
+    "verified dates and calendar-month boundaries",
+    "approved expiring exceptions",
+    "reciprocal entitlement",
+    "anonymous opt-in requests",
+    "authoritative own net only",
+    "two independent consents",
+    "changed pay invalidates consent",
+    "officer role isolation",
+    "stale version conflicts",
+    "approval reservations and cancellation",
+    "assignment and identity source checks",
+    "actual source-verified atomic handover",
+    "original approval retained",
+    "mobile overflow",
+    "real server restart persistence"
+  ],
+  "externalSupabaseProjectUsed": false,
+  "paidAiInferenceUsed": false,
+  "data": "isolated databases and synthetic workers only"
+}

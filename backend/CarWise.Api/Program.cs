@@ -114,6 +114,8 @@ builder.Services.AddScoped(sp=>sp.GetRequiredService<ConfigurationSnapshot>().Da
 builder.Services.AddScoped<PayrollEngine>();
 builder.Services.AddSingleton(repository);builder.Services.AddSingleton(database);
 builder.Services.AddScoped<DecisionStore>();
+builder.Services.AddScoped<FleetStore>();
+builder.Services.AddScoped<FleetService>();
 builder.Services.AddSingleton<AiKeyHealth>();
 builder.Services.AddSingleton<IOcrSandboxRuntime,DockerOcrRuntime>();
 builder.Services.AddSingleton<ILocalPayslipOcr,SandboxedPayslipOcr>();
@@ -311,6 +313,7 @@ app.MapPost("/api/setup/admin",async(CreateAccount request,HttpContext context,A
 app.MapAdministration(repository.Provider,supabaseUrl,demo);
 app.MapPayslips();
 app.MapDecisionTools(AuthorizeEmployee);
+app.MapFleet();
 var dist=Path.Combine(root,"dist");
 if(!Directory.Exists(dist))dist=Path.Combine(AppContext.BaseDirectory,"wwwroot");
 if(Directory.Exists(dist))

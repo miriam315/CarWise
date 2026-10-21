@@ -20,7 +20,8 @@
     "predev": "node scripts/browser-ocr-assets.mjs",
     "browser-ocr:setup": "node scripts/browser-ocr-assets.mjs",
     "test:browser-payroll": "node scripts/browser-payroll-tests.mjs",
-    "verify:innovations": "python3 scripts/verify-innovations.py"
+    "verify:innovations": "python3 scripts/verify-innovations.py",
+    "verify:fleet": "python3 scripts/verify-fleet.py"
   },
   "dependencies": {
     "@fontsource/heebo": "^5.3.0",

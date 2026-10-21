@@ -110,6 +110,7 @@ try:
    r=query('/simulate',{'employee':e});assert next(r for r in r['results'] if r['id']=='CAR-10')['participation']==350
    assert query('/conversation/E-001')['status']=='Active'
    assert any('הנציג ענה' in m['text'] for m in query('/history/E-001'))
+   SourceFileLoader('fleet_checks',str(ROOT/'scripts/fleet-checks.py')).load_module().check(query)
    print('PASS: real Supabase/PostgREST adapter, 77,988 records, reference data, simulation, transactional agent RPC, conversation resume, anonymous RLS denial.')
    SourceFileLoader('ai_registry_checks',str(ROOT/'scripts/ai-model-checks.py')).load_module().check_api(query)
    os.killpg(process.pid,signal.SIGTERM);process.wait(timeout=10)
