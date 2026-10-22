@@ -1,3 +1,4 @@
+import {ApiError} from './api';
 import {lazy,Suspense,useEffect,useRef,useState} from 'react';
 import {Upload,Camera,FileCheck,ShieldCheck,CheckCircle2,AlertCircle,X,ScanSearch,CalendarDays} from 'lucide-react';
 import {api,upload} from './api';
@@ -33,7 +34,7 @@ export default function PayslipUpload({employeeId,employee,enabled,disabledReaso
    setFile(new File([original],original.name,{type,lastModified:original.lastModified}));
   }catch{if(id===selection.current)setError('לא ניתן לקרוא את הקובץ. בחרו אותו שוב.')}
  }
- async function refreshAvailability(){try{setAvailability(await api('/payslip/status'));setError('')}catch(e){setError((e as Error).message)}}
+ async function refreshAvailability(){try{setAvailability(await api('/payslip/status'));setError('')}catch(e){setError(e instanceof ApiError&&e.code==='output_limit'?'עיבוד התלוש נעצר לפני שהושלם. לא הועברו נתונים חלקיים לטופס. יש לפנות למנהל המערכת לבדיקת הגדרות המודל, או להזין נתונים ידנית.':(e as Error).message)}}
  const previousMonth=[...reviewedMonths].filter(m=>m.period!==period).sort((a,b)=>b.period.localeCompare(a.period))[0];
  const differences=previousMonth?['salary','commission','bonus'].filter(k=>values[k]!==''&&values[k]!=null&&Number(values[k])!==previousMonth.fields[k]):[];
  const ready=availability.enabled;
@@ -42,13 +43,13 @@ export default function PayslipUpload({employeeId,employee,enabled,disabledReaso
  async function extract(){if(!prepared||!consent||busy||!ready)return;setBusy(true);setError('');setResult(null);setApplied(false);setBoxes(undefined);setFocused('');const id=selection.current;controller.current=new AbortController();
   try{const r:PayrollRead=await upload('/payslip/extract?employee='+encodeURIComponent(employeeId)+'&consent=true&redactionReviewed=true',prepared,controller.current.signal);
    if(id!==selection.current)return;setResult(r);setValues(Object.fromEntries(Object.entries(r.fields).map(([key,f])=>[key,f.value==null?'':String(f.value)])));setSelected(Object.fromEntries(Object.keys(labels).map(key=>[key,false])));
-  }catch(e){if(id===selection.current)setError((e as Error).message)}finally{if(id===selection.current){setBusy(false);setProgress('')}}
+  }catch(e){if(id===selection.current)setError(e instanceof ApiError&&e.code==='output_limit'?'עיבוד התלוש נעצר לפני שהושלם. לא הועברו נתונים חלקיים לטופס. יש לפנות למנהל המערכת לבדיקת הגדרות המודל, או להזין נתונים ידנית.':(e as Error).message)}finally{if(id===selection.current){setBusy(false);setProgress('')}}
  }
  function patch(all=false){const result:Record<string,number>={};for(const key of Object.keys(labels)){if(!selected[key]){if(all)throw Error('להשוואת חודשים יש לבדוק ולסמן במפורש את כל שבעת השדות.');continue}const value=Number(values[key]);if(values[key]===''||!Number.isFinite(value)||value<0||value>maxima[key])throw Error('יש לבדוק את הערך בשדה '+labels[key]);result[key]=value}if(!Object.keys(result).length)throw Error('סמנו לפחות שדה אחד להעברה לטופס.');return result}
- function apply(){try{onApply(patch());setError('');setApplied(true);setResult(null);setBoxes(undefined)}catch(e){setError((e as Error).message)}}
+ function apply(){try{onApply(patch());setError('');setApplied(true);setResult(null);setBoxes(undefined)}catch(e){setError(e instanceof ApiError&&e.code==='output_limit'?'עיבוד התלוש נעצר לפני שהושלם. לא הועברו נתונים חלקיים לטופס. יש לפנות למנהל המערכת לבדיקת הגדרות המודל, או להזין נתונים ידנית.':(e as Error).message)}}
  async function saveMonth(){if(!employee)return;try{const fields=patch(true);if(!period||!bonusKind)throw Error('יש לאשר חודש תלוש ולהגדיר האם הבונוס קבוע, חד־פעמי או אפס.');
   const next=await api('/decision/month',{employee,expectedRevision:monthRevision,month:{period,fields,bonusKind}});setMonthRevision(next.revision);setReviewedMonths(next.months);setMonthSaved('חודש '+period+' נשמר עם השדות המאושרים. הפרופיל הנוכחי לא השתנה.');setError('');
- }catch(e){setError((e as Error).message);try{const fresh=await api('/decision/state/'+encodeURIComponent(employeeId));setMonthRevision(fresh.revision);setReviewedMonths(fresh.months)}catch{}}}
+ }catch(e){setError(e instanceof ApiError&&e.code==='output_limit'?'עיבוד התלוש נעצר לפני שהושלם. לא הועברו נתונים חלקיים לטופס. יש לפנות למנהל המערכת לבדיקת הגדרות המודל, או להזין נתונים ידנית.':(e as Error).message);try{const fresh=await api('/decision/state/'+encodeURIComponent(employeeId));setMonthRevision(fresh.revision);setReviewedMonths(fresh.months)}catch{}}}
  function locate(key:string){const next=result?.regions?.[key];if(!next?.length)return;setBoxes(next);setFocused(key);preview.current?.scrollIntoView({behavior:'smooth',block:'start'})}
  return <section className="panel payslip-panel">
   <div className="payslip-heading"><span className="stat-icon lavender"><FileCheck size={22}/></span><div><h2>מהתלוש, ישר לפרטים שלך.</h2><p>מעלים, בודקים ומאשרים. שום נתון לא משנה את החישוב בלי אישורך.</p></div></div>

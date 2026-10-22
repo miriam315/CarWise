@@ -121,9 +121,10 @@ public sealed class ConfigurationValidator(ReferenceData officialSource)
     public static void ValidateAi(AiProfile profile)
     {
         if(profile.DisplayName is null||profile.DisplayName.Length>100)Fail("שם ספק ארוך מדי");
+        if(profile.GeminiThinking is not ("auto" or "default" or "off" or "minimal" or "low"))Fail("הגדרת חשיבה של Gemini אינה נתמכת");
         if(profile.Provider is not ("openai" or "compatible" or "anthropic" or "gemini"))Fail("ספק AI לא נתמך");
         if(string.IsNullOrWhiteSpace(profile.Model)||profile.Model.Length>160||!Regex.IsMatch(profile.Model,@"^[A-Za-z0-9_./:@-]+$"))Fail("שם מודל לא תקין");
-        if(profile.MaxOutputTokens is <128 or >8192)Fail($"מגבלת הפלט היא {profile.MaxOutputTokens}; יש להזין בין 128 ל־8,192 טוקנים");
+        if(profile.MaxOutputTokens<1)Fail("מגבלת הפלט חייבת להיות מספר שלם חיובי לפי בחירת המנהל");
         if(profile.TimeoutSeconds is <5 or >90)Fail($"זמן ההמתנה הוא {profile.TimeoutSeconds}; יש להזין בין 5 ל־90 שניות");
         if(!Uri.TryCreate(profile.BaseUrl,UriKind.Absolute,out var uri)||uri.Scheme!="https"||!uri.IsDefaultPort||!string.IsNullOrEmpty(uri.UserInfo)||!string.IsNullOrEmpty(uri.Query)||!string.IsNullOrEmpty(uri.Fragment))Fail("כתובת AI חייבת להיות HTTPS ללא פרטי גישה, פורט או פרמטרים");
         if(profile.CustomProvider&&(!profile.CustomEndpointApproved||string.IsNullOrWhiteSpace(profile.DisplayName)))Fail("ספק ידני דורש שם ואישור מפורש של כתובת ה־API");

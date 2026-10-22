@@ -305,6 +305,13 @@ app.MapPost("/api/tickets/{id:guid}",async(Guid id,AnswerRequest request,HttpCon
     if(ticket is null)return Results.NotFound(new{error="הפנייה לא נמצאה"});
     var conversation=await repository.ConversationAsync(ticket.EmployeeId,ct);
     var e=conversation?.Employee??ticket.Snapshot;
+    if(ParticipationRules.GeneralTicket(ticket.Target))
+    {
+        var message="הנציג ענה לגבי הרכב שאינו בקטלוג: "+request.Answer.Trim()+"\nאין עדיין חישוב נטו לרכב שאינו בקטלוג. לאחר השלמת הנתונים בחרו את הדגם המדויק ונמשיך מהנתונים האישיים שכבר נשמרו.";
+        await repository.ResolveAsync(id,0,request.Answer.Trim(),message,ct);
+        await repository.SaveConversationAsync(e with{AdvisorState=new()},null,ct);
+        return Results.Ok(new{status="resolved"});
+    }
     var engine=context.RequestServices.GetRequiredService<PayrollEngine>();
     if((!IntakeFields.Known(e,"participation")||ticket.Snapshot.AdvisorState?.AwaitingField=="participation")&&e.CurrentCar==ticket.Target)
     {

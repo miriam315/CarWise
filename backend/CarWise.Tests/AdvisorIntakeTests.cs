@@ -10,6 +10,7 @@ namespace CarWise.Tests;
 public sealed class ConversationDatabase:IJsonDatabase
 {
     public Dictionary<string,JsonNode> Conversations {get;}=[];
+    public Dictionary<string,JsonNode> Rules {get;}=[];
     public List<JsonNode> Tickets {get;}=[];
     public List<(string Employee,string Role,string Text)> Messages {get;}=[];
     public TimeSpan ReadDelay {get;set;}
@@ -20,9 +21,10 @@ public sealed class ConversationDatabase:IJsonDatabase
         IEnumerable<JsonNode> rows=table switch{
             "carwise_conversations"=>Conversations.Values,
             "carwise_tickets"=>Tickets,
+            "carwise_rules"=>Rules.Values,
             "carwise_messages"=>Messages.Select((m,i)=>(JsonNode)new JsonObject{["id"]=i+1,["employee_id"]=m.Employee,["role"]=m.Role,["text"]=m.Text}),
             _=>[]};
-        return new JsonArray(rows.Where(row=>filters is null||filters.All(filter=>row[filter.Key]?.ToString()==filter.Value)).Skip(offset).Take(limit).Select(row=>row.DeepClone()).ToArray());
+        return new JsonArray(rows.Where(row=>filters is null||filters.All(filter=>(filter.Key=="id_prefix"?row["id"]!.ToString().StartsWith(filter.Value,StringComparison.Ordinal):row[filter.Key]?.ToString()==filter.Value))).Skip(offset).Take(limit).Select(row=>row.DeepClone()).ToArray());
     }
     public Task<JsonNode> RpcAsync(string name,JsonObject parameters,CancellationToken ct=default)
     {
@@ -43,8 +45,9 @@ public sealed class ConversationDatabase:IJsonDatabase
         throw new NotSupportedException(name);
     }
     public Task AddMessageAsync(string employee,string role,string text,CancellationToken ct=default){ct.ThrowIfCancellationRequested();Messages.Add((employee,role,text));return Task.CompletedTask;}
-    public Task UpsertAsync(string table,JsonArray rows,CancellationToken ct=default)=>throw new NotSupportedException();
-    public Task<bool> TryWriteRuleAsync(string id,long? expectedRevision,JsonNode document,CancellationToken ct=default)=>throw new NotSupportedException();
+    public Task UpsertAsync(string table,JsonArray rows,CancellationToken ct=default){if(table!="carwise_rules")throw new NotSupportedException();foreach(var row in rows)Rules[row!["id"]!.ToString()]=row.DeepClone();return Task.CompletedTask;}
+    public Task<bool> TryWriteRuleAsync(string id,long? expectedRevision,JsonNode document,CancellationToken ct=default)
+    {var current=Rules.GetValueOrDefault(id)?["document"]?["revision"]?.GetValue<long>();if(current!=expectedRevision)return Task.FromResult(false);Rules[id]=new JsonObject{["id"]=id,["document"]=document.DeepClone()};return Task.FromResult(true);}
 }
 public sealed class AdvisorIntakeTests
 {
@@ -126,6 +129,43 @@ public sealed class AdvisorIntakeTests
         Assert.Single(db.Tickets);Assert.Equal(employee.CurrentCar,db.Tickets[0]["target"]!.ToString());Assert.Contains("לא אציג נטו",waiting["reply"]!.ToString());
         db.Tickets[0]["status"]="resolved";db.Tickets[0]["answer"]="אישור";db.Tickets[0]["participation"]=0m;
         var resumed=await Chat(Service(db),employee,"נמשיך");Assert.True(resumed["complete"]!.GetValue<bool>());Assert.Equal(0,Returned(resumed).Participation);
+    }
+    [Fact] public async Task CatalogueDefaultsAreExplainedWithoutChangingCurrentPersonalParticipation()
+    {
+        var db=new ConversationDatabase();var e=Data.Employees[0];var reply=await Chat(Service(db),e,"בחרתי","CAR-10");
+        Assert.Contains("ברירת מחדל בקטלוג",reply["reply"]!.ToString());Assert.Empty(db.Tickets);
+        var simulation=await Service(db).SimulateAsync(e,default);
+        Assert.Equal(e.Participation,simulation.Current.Participation);
+        Assert.Equal("catalogue",simulation.Results.Single(r=>r.Id=="CAR-10").ParticipationSource);
+    }
+    [Fact] public async Task PersonalAlternativeAmountAndRepresentativeConfirmationHaveDistinctSources()
+    {
+        var db=new ConversationDatabase();var service=Service(db);var e=Data.Employees[0];
+        await Chat(service,e,"בחרתי","CAR-10");
+        var reported=await Chat(service,e,"השתתפות ברכב החדש 777","CAR-10");
+        var result=(await service.SimulateAsync(e,default)).Results.Single(r=>r.Id=="CAR-10");
+        Assert.Equal(777,result.Participation);Assert.Equal("employee",result.ParticipationSource);Assert.Empty(db.Tickets);
+        var dispute=await Chat(service,e,"אצלי סוכם אחרת ולא יודע כמה, אבקש אישור נציג","CAR-10");
+        Assert.Equal("targetParticipation",dispute["awaitingField"]!.ToString());Assert.Single(db.Tickets);
+        Assert.True((await service.SimulateAsync(e,default)).Results.Single(r=>r.Id=="CAR-10").Pending);
+        db.Tickets[0]["status"]="resolved";db.Tickets[0]["participation"]=444m;
+        result=(await Service(db).SimulateAsync(e,default)).Results.Single(r=>r.Id=="CAR-10");
+        Assert.Equal(444,result.Participation);Assert.Equal("representative",result.ParticipationSource);
+        Assert.Equal(e.Participation,(await service.SimulateAsync(e,default)).Current.Participation);
+    }
+    [Fact] public async Task AlternativeReportNeverFillsAnUnknownCurrentPersonalContribution()
+    {
+        var db=new ConversationDatabase();var e=Data.Employees[0];await new Repository(db).ReportParticipationAsync(e.Id,e.CurrentCar!,999,default);
+        var unknown=e with{KnownFields=[..IntakeFields.All.Where(f=>f!="participation")]};
+        Assert.False(IntakeFields.Known(await Service(db).RefreshKnownParticipationAsync(unknown,default),"participation"));
+    }
+    [Fact] public async Task UnknownCatalogueVehicleCreatesNonFinancialReferralWithoutInventingNet()
+    {
+        var db=new ConversationDatabase();var e=Data.Employees[0];var reply=await Chat(Service(db),e,"רכב בדיקה XYZ לא מופיע בקטלוג");
+        Assert.Contains("לא אנחש",reply["reply"]!.ToString());Assert.Null(reply["target"]);
+        var ticket=Assert.Single(await new Repository(db).TicketsAsync(e.Id));Assert.True(ParticipationRules.GeneralTicket(ticket.Target));
+        await new Repository(db).ResolveAsync(ticket.Id,0,"synthetic answer","synthetic answer",default);
+        Assert.Empty((await new Repository(db).ParticipationAsync(e.Id)).Overrides);
     }
     private sealed class SlowExtraction:IDataExtractionService
     {public string Mode=>"ai";public async Task<ExtractedData> ExtractAsync(string text,Employee known,IReadOnlyList<Message> history,CancellationToken ct){await Task.Delay(Timeout.InfiniteTimeSpan,ct);return new();}}

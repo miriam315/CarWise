@@ -14,6 +14,8 @@ public static class FinancialText
     public static string Signed(decimal value)=>(value>=0?"+":"−")+Number(Math.Abs(value));
     public static string Template(Alternative a)=>$"בחלופה {a.Car?.Model??"ויתור על הרכב"}, הנטו המשוער שלך יהיה {Number(a.Net)} ₪ בחודש — שינוי של {Signed(a.Delta)} ₪ לעומת היום.\n"+
         $"שווי השימוש: {Number(a.Value)} ₪; השתתפות: {Number(a.Participation)} ₪. "+
+        (a.Car is not null?$"מקור ההשתתפות: {ParticipationRules.SourceText(a.ParticipationSource)}. ":"")+
+        (a.Car is not null&&a.ParticipationSource=="catalogue"?"אם אצלך סוכם אחרת, אפשר למסור את הסכום או לבקש אישור נציג. ":"")+
         (a.ElectricNet>0?$"כלולים {Number(a.ElectricNet)} ₪ נטו החזר חשמל לפי המדיניות. ":"")+
         (a.FamilyGap>0?$"חלקך בפער המסלול המשפחתי: {Number(a.FamilyGap)} ₪. ":"")+
         (a.Maintenance>0?$"אחזקת הרכב: {Number(a.Maintenance)} ₪ ברוטו; מס והפרשות לפי המדיניות הפעילה. ":"")+"\n"+a.Reason+". הפירוט זמין בתצוגת ההשוואה.";

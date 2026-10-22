@@ -15,7 +15,7 @@ public sealed class IdentityAndLimitsTests
         var caller=await new AccessControl(client,false).AuthenticateAsync(context,default);
         Assert.True(caller!.IsAdmin);Assert.Equal("",caller.EmployeeId);Assert.Equal("manager@example.test",caller.Email);Assert.Equal("Manager",caller.DisplayName);
     }
-    [Theory][InlineData(127,35,"128")][InlineData(8193,35,"8,192")][InlineData(1200,4,"5")][InlineData(1200,91,"90")]
+    [Theory][InlineData(0,35,"חיובי")][InlineData(-1,35,"חיובי")][InlineData(1200,4,"5")][InlineData(1200,91,"90")]
     public void InvalidLimitsIdentifyTheFieldAndAllowedRange(int tokens,int timeout,string expected)
     {
         var error=Assert.Throws<ArgumentException>(()=>ConfigurationValidator.ValidateAi(new(){MaxOutputTokens=tokens,TimeoutSeconds=timeout}));Assert.Contains(expected,error.Message);

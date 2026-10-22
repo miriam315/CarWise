@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parent.parent
 OUTPUT = ROOT / '.local' / 'test-results'
 OUTPUT.mkdir(parents=True, exist_ok=True)
 parser = argparse.ArgumentParser(description=__doc__)
-parser.add_argument('--suite', action='append', choices=['fleet', 'intent', 'innovations', 'car-media', 'judge-demo', 'payslip', 'workspace', 'ai-model', 'employee-setup'])
+parser.add_argument('--suite', action='append', choices=['fleet', 'intent', 'innovations', 'car-media', 'judge-demo', 'payslip', 'workspace', 'ai-model', 'employee-setup', 'participation'])
 parser.add_argument('--quick', action='store_true', help='OCR: test 2 documents instead of all 12')
 parser.add_argument('--video', action='store_true', help='Record judge rehearsal; requires Playwright ffmpeg')
 args = parser.parse_args()
@@ -49,7 +49,7 @@ def load_suite(name):
     return module
 
 
-for suite in args.suite or ['fleet', 'intent', 'innovations', 'car-media', 'judge-demo', 'payslip', 'workspace', 'ai-model', 'employee-setup']:
+for suite in args.suite or ['fleet', 'intent', 'innovations', 'car-media', 'judge-demo', 'payslip', 'workspace', 'ai-model', 'employee-setup', 'participation']:
     dbname = 'carwise_e2e_' + uuid.uuid4().hex
     test_connection = re.sub(r'(?i)((?:^|;)\s*Database\s*=\s*)[^;]+', lambda m: m[1] + dbname, connection)
     subprocess.run(['docker', 'exec', container, 'createdb', '-U', db_user, dbname], check=True)

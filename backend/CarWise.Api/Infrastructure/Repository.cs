@@ -74,12 +74,20 @@ public sealed class Repository(IJsonDatabase db)
             var rows=await db.ReadAsync("carwise_tickets",employeeId is null?null:new Dictionary<string,string>{{"employee_id",employeeId}},offset:offset,ct:ct);
             if(rows.Count==0)break;result.AddRange(rows.Select(r=>TicketFrom(r!)));offset+=rows.Count;
         }
+        for(var offset=0;;)
+        {
+            var rows=await db.ReadAsync("carwise_rules",new Dictionary<string,string>{{"id_prefix","catalogue-ticket:"}},offset:offset,ct:ct);
+            if(rows.Count==0)break;
+            foreach(var row in rows){var ticket=TicketFrom(row!["document"]!);if(employeeId is null||ticket.EmployeeId==employeeId)result.Add(ticket);}
+            offset+=rows.Count;
+        }
         return result.OrderByDescending(t=>t.Created).ToList();
     }
     public async Task<Ticket?> TicketAsync(Guid id,CancellationToken ct=default)
     {
         var rows=await db.ReadAsync("carwise_tickets",new Dictionary<string,string>{{"id",id.ToString()}},ct:ct);
-        return rows.Count==0?null:TicketFrom(rows[0]!);
+        if(rows.Count>0)return TicketFrom(rows[0]!);
+        var general=await GeneralTicketDocument(id,ct);return general is null?null:TicketFrom(general);
     }
     public async Task<List<Message>> HistoryAsync(string employee,CancellationToken ct=default)
     {
@@ -99,14 +107,53 @@ public sealed class Repository(IJsonDatabase db)
         var rows=await db.ReadAsync("carwise_conversations",new Dictionary<string,string>{{"employee_id",employee}},ct:ct);
         return rows.Count==0?null:new(Read<Employee>(rows[0]!["employee"]!),rows[0]!["status"]!.GetValue<string>(),rows[0]!["target"]?.GetValue<string>());
     }
-    public async Task<Ticket> CreateTicketAsync(Employee e,string target,string question,CancellationToken ct=default)=>TicketFrom(
-        await db.RpcAsync("carwise_create_ticket",new(){["p_employee"]=JsonNode.Parse(JsonDefaults.Serialize(e)),["p_target"]=target,["p_question"]=question},ct));
-    public async Task<Ticket> ResolveAsync(Guid id,decimal participation,string answer,string message,CancellationToken ct=default)=>TicketFrom(
-        await db.RpcAsync("carwise_resolve_ticket",new(){["p_id"]=id.ToString(),["p_participation"]=participation,["p_answer"]=answer,["p_message"]=message},ct));
-    public async Task<(Dictionary<string,decimal> Overrides,HashSet<string> Pending)> ParticipationAsync(string id,CancellationToken ct=default)
+    private Task<JsonArray> GeneralTicketRows(Guid id,CancellationToken ct)=>db.ReadAsync("carwise_rules",new Dictionary<string,string>{{"id","catalogue-ticket:"+id}},ct:ct);
+    private async Task<JsonNode?> GeneralTicketDocument(Guid id,CancellationToken ct)=>(await GeneralTicketRows(id,ct)).FirstOrDefault()?["document"];
+    public async Task<Ticket> CreateTicketAsync(Employee e,string target,string question,CancellationToken ct=default)
     {
-        var tickets=await TicketsAsync(id,ct);
-        var approved=tickets.Where(t=>t.Status=="resolved").GroupBy(t=>t.Target).ToDictionary(g=>g.Key,g=>g.First().Participation!.Value);
-        return (approved,tickets.Where(t=>t.Status=="pending").Select(t=>t.Target).ToHashSet());
+        if(!ParticipationRules.GeneralTicket(target))return TicketFrom(await db.RpcAsync("carwise_create_ticket",new(){["p_employee"]=JsonNode.Parse(JsonDefaults.Serialize(e)),["p_target"]=target,["p_question"]=question},ct));
+        // Nonfinancial catalogue requests do not pretend to be cars or bypass the financial ticket FK.
+        var id=new Guid(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(e.Id+"/"+target)).AsSpan(0,16));
+        var previous=await GeneralTicketDocument(id,ct);
+        if(previous?["status"]?.GetValue<string>()=="pending")return TicketFrom(previous);
+        var revision=previous?["revision"]?.GetValue<long>();
+        var history=previous?["history"]?.DeepClone()?.AsArray()??new JsonArray();
+        if(previous is not null){history.Add(new JsonObject{["answer"]=previous["answer"]?.DeepClone(),["resolved_at"]=previous["resolved_at"]?.DeepClone()});while(history.Count>20)history.RemoveAt(0);}
+        var document=new JsonObject{["revision"]=(revision??0)+1,["id"]=id.ToString(),["employee_id"]=e.Id,["snapshot"]=JsonNode.Parse(JsonDefaults.Serialize(e)),["target"]=target,["question"]=question,["status"]="pending",["answer"]=null,["participation"]=null,["created"]=DateTimeOffset.UtcNow.ToString("O"),["history"]=history};
+        if(!await db.TryWriteRuleAsync("catalogue-ticket:"+id,revision,document,ct))throw new CarWise.Api.Administration.ConfigurationConflictException();
+        await AddMessageAsync(e.Id,"assistant","הפנייה לגבי הרכב שאינו בקטלוג הועברה לנציג. לא מוצג חישוב כספי לרכב הזה.",ct);
+        await SaveConversationAsync(e,null,ct);return TicketFrom(document);
+    }
+    public async Task<Ticket> ResolveAsync(Guid id,decimal participation,string answer,string message,CancellationToken ct=default)
+    {
+        var document=await GeneralTicketDocument(id,ct);
+        if(document is null)return TicketFrom(await db.RpcAsync("carwise_resolve_ticket",new(){["p_id"]=id.ToString(),["p_participation"]=participation,["p_answer"]=answer,["p_message"]=message},ct));
+        if(document["status"]!.GetValue<string>()=="resolved")return TicketFrom(document);
+        var revision=document["revision"]!.GetValue<long>();var next=document.DeepClone();next["revision"]=revision+1;next["status"]="resolved";next["answer"]=answer;next["participation"]=0m;next["resolved_at"]=DateTimeOffset.UtcNow.ToString("O");
+        if(!await db.TryWriteRuleAsync("catalogue-ticket:"+id,revision,next,ct))throw new CarWise.Api.Administration.ConfigurationConflictException();
+        await AddMessageAsync(next["employee_id"]!.GetValue<string>(),"assistant",message,ct);return TicketFrom(next);
+    }
+    private static string ReportedPrefix(string employee)=>"reported-participation:"+Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(employee)))+":";
+    public Task ReportParticipationAsync(string employee,string target,decimal amount,CancellationToken ct)
+    {
+        if(amount<0||amount>20000)throw new ArgumentException("סכום ההשתתפות חייב להיות בין 0 ל־20,000 ₪");
+        var id=ReportedPrefix(employee)+target;
+        return db.UpsertAsync("carwise_rules",new JsonArray(new JsonObject{["id"]=id,["document"]=new JsonObject{["target"]=target,["amount"]=amount,["source"]="employee",["at"]=DateTimeOffset.UtcNow.ToString("O")}}),ct);
+    }
+    public async Task<(Dictionary<string,decimal> Overrides,HashSet<string> Pending)> ParticipationAsync(string id,CancellationToken ct=default)
+    {var result=await ParticipationWithSourcesAsync(id,ct);return(result.Overrides,result.Pending);}
+    public async Task<(Dictionary<string,decimal> Overrides,HashSet<string> Pending,Dictionary<string,string> Sources)> ParticipationWithSourcesAsync(string id,CancellationToken ct=default)
+    {
+        var amounts=new Dictionary<string,decimal>();var sources=new Dictionary<string,string>();
+        var reported=await db.ReadAsync("carwise_rules",new Dictionary<string,string>{{"id_prefix",ReportedPrefix(id)}},ct:ct);
+        foreach(var row in reported)
+        {
+            var document=row?["document"];var target=document?["target"]?.GetValue<string>();var amount=document?["amount"]?.GetValue<decimal>();
+            if(target is not null&&amount is >=0 and <=20000){amounts[target]=amount.Value;sources[target]="employee";}
+        }
+        var tickets=(await TicketsAsync(id,ct)).Where(t=>!ParticipationRules.GeneralTicket(t.Target)).ToList();
+        foreach(var approved in tickets.Where(t=>t.Status=="resolved").GroupBy(t=>t.Target).Select(g=>g.First()))
+        {amounts[approved.Target]=approved.Participation!.Value;sources[approved.Target]="representative";}
+        return(amounts,tickets.Where(t=>t.Status=="pending").Select(t=>t.Target).ToHashSet(),sources);
     }
 }

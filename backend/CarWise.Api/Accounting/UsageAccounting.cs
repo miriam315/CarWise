@@ -60,7 +60,7 @@ public sealed class UsageAccounting(IJsonDatabase database,ConfigurationSnapshot
     {
         var tokens=TokenUsage.Parse(record.Provider,body);var usd=tokens?.Cost(record.Pricing);
         var next=record with{CompletedAt=DateTimeOffset.UtcNow,Status=error is null?"completed":"failed",Tokens=tokens,
-            EstimatedUsd=usd,EstimatedIls=usd*record.ExchangeRate?.UsdIls,ErrorCode=error is AI.AiProviderException provider?provider.Code:error is null?null:"request_failed"};
+            EstimatedUsd=usd,EstimatedIls=usd*record.ExchangeRate?.UsdIls,ErrorCode=error is AI.AiUnavailableException ai?ai.Code:error is null?null:"request_failed"};
         try
         {
             using var timeout=new CancellationTokenSource(TimeSpan.FromSeconds(10));await StoreAsync(next,timeout.Token);

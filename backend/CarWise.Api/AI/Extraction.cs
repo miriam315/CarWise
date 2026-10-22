@@ -16,6 +16,8 @@ public sealed record ExtractedData
     public decimal? Credits {get;init;}
     public decimal? Children {get;init;}
     public string? Occupation {get;init;}
+    public decimal? TargetParticipation {get;init;}
+    public bool ParticipationNeedsApproval {get;init;}
     public bool IsWaiverRequested {get;init;}
     public bool WantsElectric {get;init;}
     public string? RequestedModel {get;init;}
@@ -45,6 +47,9 @@ public sealed class LocalExtractionService : IDataExtractionService
             Commission=Match(@"עמלות\s*[:=]?\s*([\d,]+(?:\.\d+)?)"),Bonus=Match(@"בונוס\s*[:=]?\s*([\d,]+(?:\.\d+)?)"),
             Pension=Match(@"פנסיה\s*[:=]?\s*([\d,]+(?:\.\d+)?)"),Fund=Match(@"קרן השתלמות\s*[:=]?\s*([\d,]+(?:\.\d+)?)"),
             Credits=Match(@"נקודות זיכוי\s*[:=]?\s*([\d,]+(?:\.\d+)?)"),Children=Match(@"(\d+)\s*ילדים"),
+            TargetParticipation=Match(@"השתתפות(?:\s+שלי)?\s+(?:ב|ל)(?:רכב\s+ה?חדש|חלופה)\s*[:=]?\s*([\d,]+(?:\.\d+)?)"),
+            ParticipationNeedsApproval=ParticipationRules.ApprovalRequested(text),
+            RequestedModel=ParticipationRules.OutsideCatalogue(text)?text:null,
             IsWaiverRequested=new[]{"לוותר","אוותר","מוותר","ויתור","בלי רכב","אחזקת רכב"}.Any(text.Contains),
             WantsElectric=new[]{"חשמל","חסכ","כדאי"}.Any(text.Contains)
         });
@@ -58,12 +63,13 @@ public sealed class AiExtractionService(IAiCompletionClient gateway,string manag
      "salary":{"type":["number","null"]},"commission":{"type":["number","null"]},"bonus":{"type":["number","null"]},
      "pension":{"type":["number","null"]},"fund":{"type":["number","null"]},"credits":{"type":["number","null"]},
      "children":{"type":["number","null"]},"occupation":{"type":["string","null"]},
+     "targetParticipation":{"type":["number","null"]},"participationNeedsApproval":{"type":"boolean"},
      "isWaiverRequested":{"type":"boolean"},"wantsElectric":{"type":"boolean"},"requestedModel":{"type":["string","null"]},
      "vehicleKey":{"anyOf":[{"type":"null"},{"type":"object","additionalProperties":false,"properties":{
       "taxYear":{"type":"integer"},"registrationYear":{"type":"integer"},"vehicleType":{"type":"string"},
       "makerCode":{"type":"string"},"modelCode":{"type":"string"}},
       "required":["taxYear","registrationYear","vehicleType","makerCode","modelCode"]}]}},
-     "required":["salary","commission","bonus","pension","fund","credits","children","occupation","isWaiverRequested","wantsElectric","requestedModel","vehicleKey"]}
+     "required":["salary","commission","bonus","pension","fund","credits","children","occupation","targetParticipation","participationNeedsApproval","isWaiverRequested","wantsElectric","requestedModel","vehicleKey"]}
     """)!;
     public async Task<ExtractedData> ExtractAsync(string text,Employee known,IReadOnlyList<Message> history,CancellationToken ct)
     {
@@ -73,12 +79,13 @@ public sealed class AiExtractionService(IAiCompletionClient gateway,string manag
             "Return null for every unstated or ambiguous field. Never calculate net salary, tax, eligibility, or infer missing numbers. "+
             "Percentage fields are percentage points (6, not .06). Only extract a full vehicleKey if ALL key parts are explicitly given. "+
             "requestedModel is only a textual hint, never an authoritative vehicle identity. isWaiverRequested only when the user asks to waive a car, not when describing current maintenance. "+
+            "targetParticipation is only an explicitly stated employee contribution for a NEW/ALTERNATIVE vehicle, never for their current car. participationNeedsApproval is true when they ask for representative confirmation or say their alternative contribution differs/unknown. "+
             "Do not infer occupation from salary. Do not include prose.",text,ct);
         var extracted=JsonDefaults.Read<ExtractedData>(result);
         // Reject numerical fields unsupported by the current message even if a provider hallucinates them.
         var numbers=Regex.Matches(text,@"\d[\d,]*(?:\.\d+)?",RegexOptions.None,TimeSpan.FromMilliseconds(100))
             .Select(m=>decimal.TryParse(m.Value.Replace(",",""),NumberStyles.Number,CultureInfo.InvariantCulture,out var n)?n:(decimal?)null).ToHashSet();
-        if(new[]{extracted.Salary,extracted.Commission,extracted.Bonus,extracted.Pension,extracted.Fund,extracted.Credits,extracted.Children}
+        if(new[]{extracted.Salary,extracted.Commission,extracted.Bonus,extracted.Pension,extracted.Fund,extracted.Credits,extracted.Children,extracted.TargetParticipation}
             .Any(n=>n is not null && !numbers.Contains(n))) throw new AiUnavailableException("המודל החזיר נתון שלא נמסר. יש להזין את הפרטים במפורש או לעדכן בטופס.");
         return extracted;
     }

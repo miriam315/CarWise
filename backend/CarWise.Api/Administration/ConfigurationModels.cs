@@ -14,6 +14,7 @@ public sealed record AiProfile
     public string Model {get;init;}="gpt-4.1-mini";
     public string BaseUrl {get;init;}="https://api.openai.com/v1/";
     public string KeyReference {get;init;}="environment:CARWISE_AI_API_KEY";
+    public string GeminiThinking {get;init;}="auto";
     public bool SupportsDocuments {get;init;}=false;
     public bool PrimaryKeyEnabled {get;init;}=true;
     public List<AiBackupKey> BackupKeys {get;init;}=[];

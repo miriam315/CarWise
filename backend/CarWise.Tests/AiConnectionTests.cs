@@ -20,7 +20,7 @@ public sealed class AiConnectionTests
         new JsonObject{["choices"]=new JsonArray(new JsonObject{["finish_reason"]=finish,["message"]=new JsonObject{["content"]=output}})}.ToJsonString())};
     private static AiProfile Profile=>new(){KeyReference="environment:CARWISE_AI_UNCONFIGURED"};
 
-    [Theory][InlineData(128,5)][InlineData(8192,90)][InlineData(1200,60)]
+    [Theory][InlineData(1,5)][InlineData(65536,90)][InlineData(128,5)][InlineData(8192,90)][InlineData(1200,60)]
     public async Task AllowedValuesSaveAndReachTheProviderUnchanged(int tokens,int seconds)
     {
         var (db,vault)=Setup();var profile=Profile with{MaxOutputTokens=tokens,TimeoutSeconds=seconds};

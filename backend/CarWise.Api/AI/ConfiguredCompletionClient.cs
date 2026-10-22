@@ -102,7 +102,7 @@ public sealed class ConfiguredCompletionClient(AiProfile profile,SecretVault vau
             var model=profile.Model.StartsWith("models/",StringComparison.Ordinal)?profile.Model[7..]:profile.Model;
             response=await client.PostAsJsonAsync("models/"+Uri.EscapeDataString(model)+":generateContent",new{
                 systemInstruction=new{parts=new[]{new{text=instructions}}},contents=new JsonArray(new JsonObject{["role"]="user",["parts"]=document is null?new JsonArray(new JsonObject{["text"]=text}):new JsonArray(new JsonObject{["text"]=text},document.GeminiPart())}),
-                generationConfig=new{responseMimeType="application/json",responseJsonSchema=schema,maxOutputTokens=profile.MaxOutputTokens}},ct);
+                generationConfig=GeminiGeneration.Create(profile,schema,document is not null)},ct);
         }
         using(response)
         {
@@ -119,9 +119,9 @@ public sealed class ConfiguredCompletionClient(AiProfile profile,SecretVault vau
             else
             {
                 var candidate=body?["candidates"]?[0];
-                if(candidate?["finishReason"]?.GetValue<string>()=="MAX_TOKENS")throw new AiUnavailableException("הפלט נקטע בגלל מגבלת הטוקנים. הגדילו את מגבלת הפלט ונסו שוב. במודלי חשיבה גם טוקנים פנימיים עשויים להיכלל במגבלה.","output_limit");
+                if(candidate?["finishReason"]?.GetValue<string>()=="MAX_TOKENS")throw new AiUnavailableException("Gemini עצר בגלל מגבלת הטוקנים לפלט הכוללת גם חשיבה. בניהול ספקי AI בדקו את מגבלת הפלט ואת הגדרת החשיבה; לחילוץ תלושים בחרו חשיבה אוטומטית מותאמת או מצב מצומצם הנתמך במודל. לא הועברו נתונים חלקיים לטופס.","output_limit");
                 if(candidate?["finishReason"]?.GetValue<string>()!="STOP")throw new AiUnavailableException("הספק חסם או לא השלים את התשובה");
-                output=string.Concat(candidate?["content"]?["parts"]?.AsArray().Select(p=>p?["text"]?.GetValue<string>()??"")??[]);
+                output=string.Concat(candidate?["content"]?["parts"]?.AsArray().Where(p=>p?["thought"]?.GetValue<bool>()!=true).Select(p=>p?["text"]?.GetValue<string>()??"")??[]);
             }
             if(string.IsNullOrWhiteSpace(output))throw new AiUnavailableException("הספק לא החזיר פלט מובנה");
             _=JsonNode.Parse(output);return output;

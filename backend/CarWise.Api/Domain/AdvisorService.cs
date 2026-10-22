@@ -14,14 +14,14 @@ public sealed class AdvisorService(ReferenceData data,PayrollEngine engine,Repos
     {
         if(IntakeFields.Known(employee,"currentCar")&&employee.CurrentCar is null)return IntakeFields.Answer(employee,"participation",0);
         if(IntakeFields.Known(employee,"participation")||employee.CurrentCar is null)return employee;
-        var (approved,_)=await repository.ParticipationAsync(employee.Id,ct);
-        return approved.TryGetValue(employee.CurrentCar,out var amount)?IntakeFields.Answer(employee,"participation",amount):employee;
+        var (approved,_,sources)=await repository.ParticipationWithSourcesAsync(employee.Id,ct);
+        return sources.GetValueOrDefault(employee.CurrentCar)=="representative"&&approved.TryGetValue(employee.CurrentCar,out var amount)?IntakeFields.Answer(employee,"participation",amount):employee;
     }
     public async Task<Simulation> SimulateAsync(Employee e,CancellationToken ct)
     {
         e=await RefreshKnownParticipationAsync(e,ct);
-        var (approved,pending)=await repository.ParticipationAsync(e.Id,ct);
-        return engine.Simulate(e,approved,pending);
+        var (approved,pending,sources)=await repository.ParticipationWithSourcesAsync(e.Id,ct);
+        return engine.Simulate(e,approved,pending,sources);
     }
     public async Task<object> ChatAsync(ChatRequest request,CancellationToken ct,bool canChangeOccupation=true)
     {
@@ -79,6 +79,7 @@ public sealed class AdvisorService(ReferenceData data,PayrollEngine engine,Repos
         e=engine.Validate(e);
         var lower=text.ToLowerInvariant();var candidates=new List<string>();var target=answered?state.Target:request.Target;
         if(target is null&&(awaiting is not null||fields.HasUpdates||text is "נמשיך" or "המשך" or "מה התשובה"))target=state.Target;
+        if((awaiting=="targetParticipation"||fields.TargetParticipation is not null||fields.ParticipationNeedsApproval||ParticipationRules.ApprovalRequested(text))&&target is null)target=state.Target;
         if(fields.IsWaiverRequested)target="waiver";
         if(target is null && fields.VehicleKey is { } key &&
             string.Concat(text.Where(c=>!char.IsWhiteSpace(c))).Contains(
@@ -106,6 +107,29 @@ public sealed class AdvisorService(ReferenceData data,PayrollEngine engine,Repos
         {
             var next=missing[0];var choices=next=="currentCar"?data.Cars.Select(car=>car.Id).ToList():new List<string>();
             return await ReplyAsync(e,new(next,target,wantsElectric,candidates.ToArray()),text,IntakeFields.Question(next,data),choices,ct,aiFallback);
+        }
+        if(target is null&&candidates.Count==0&&(ParticipationRules.OutsideCatalogue(text)||fields.RequestedModel is {Length:>0} requestedHint&&text.Contains(requestedHint,StringComparison.OrdinalIgnoreCase)))
+        {
+            var outsideHint=fields.RequestedModel??text;
+            var ticketTarget=ParticipationRules.CatalogueTarget(outsideHint);
+            e=e with{AdvisorState=new("catalogueVehicle",null,wantsElectric)};
+            await repository.CreateTicketAsync(e,ticketTarget,"בדיקת רכב שאינו בקטלוג: "+outsideHint+". נדרשים זיהוי רשמי, זכאות והשתתפות; אין לאשר חישוב לפני הוספת נתוני מקור.",ct);
+            return await ReplyAsync(e,e.AdvisorState,text,"לא נמצאה התאמה לרכב בקטלוג. העברתי שאלה לנציג; לא אנחש השתתפות או שווי שימוש ולא אציג נטו לרכב הזה. אחרי השלמת הקטלוג נוכל להמשיך בהשוואה.",[],ct);
+        }
+        if(target is not null&&data.Cars.Any(c=>c.Id==target))
+        {
+            if(!engine.Eligibility(e,data.Cars.Single(c=>c.Id==target)).Eligible)
+                return await ReplyAsync(e,new(null,target,wantsElectric),text,"החלופה אינה בקבוצת הזכאות שלך. אפשר לבחור חלופה אחרת מהקטלוג.",[],ct);
+            decimal? reported=fields.TargetParticipation;
+            if(reported is null&&request.Target is not null)reported=(await new LocalExtractionService().ExtractAsync(text,e,[],ct)).TargetParticipation;
+            if(awaiting=="targetParticipation"&&IntakeFields.TryNumber(text,"participation",out var amount))reported=amount;
+            if(reported is not null)await repository.ReportParticipationAsync(e.Id,target,reported.Value,ct);
+            if(fields.ParticipationNeedsApproval||ParticipationRules.ApprovalRequested(text))
+            {
+                e=e with{AdvisorState=new("targetParticipation",target,wantsElectric)};
+                await repository.CreateTicketAsync(e,target,"העובד מבקש אישור השתתפות אישית לרכב החדש: "+text,ct);
+                return await ReplyAsync(e,e.AdvisorState,text,"שלחתי לנציג בקשה לאישור ההשתתפות האישית שלך. ברירת המחדל מהקטלוג אינה מוצגת כעת כסכום סופי עבורך; ההשוואה לרכב הזה ממתינה לאישור.",[],ct);
+            }
         }
         e=e with{AdvisorState=new(null,target,wantsElectric)};
         var simulation=await SimulateAsync(e,ct);

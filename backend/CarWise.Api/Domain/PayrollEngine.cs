@@ -92,7 +92,7 @@ public sealed class PayrollEngine(ReferenceData data)
             Pension=pension,Fund=fund,Value=value,Participation=part,FamilyGap=family,Maintenance=maintenance,
             ElectricGross=extra,ElectricNet=output.Net-initial.Net,Budget=budget,Cost=car?.Cost??0m};
     }
-    public Simulation Simulate(Employee employee,IReadOnlyDictionary<string,decimal>? overrides=null,IReadOnlySet<string>? pending=null)
+    public Simulation Simulate(Employee employee,IReadOnlyDictionary<string,decimal>? overrides=null,IReadOnlySet<string>? pending=null,IReadOnlyDictionary<string,string>? participationSources=null)
     {
         IntakeFields.RequireComplete(employee);
         var e=Validate(employee);var currentCar=data.Cars.SingleOrDefault(c=>c.Id==e.CurrentCar);
@@ -102,9 +102,10 @@ public sealed class PayrollEngine(ReferenceData data)
             var id=car?.Id??"waiver";var (ok,reason)=Eligibility(e,car);
             if(!ok){results.Add(new(){Id=id,Car=car is null?null:data.Enrich(car),Eligible=false,Reason=reason});continue;}
             decimal? part=overrides?.TryGetValue(id,out var p)==true?p:null;
-            if(car is {ParticipationKnown:false} && part is null){results.Add(new(){Id=id,Car=data.Enrich(car),Eligible=true,Pending=true,Budget=Number(data.Rules["budgets"]![e.Group]),Cost=car.Cost,Value=data.Lookup(car).Value,Reason="סכום ההשתתפות אינו ידוע; נדרש אישור נציג"});continue;}
+            if(car is {ParticipationKnown:false} && part is null){results.Add(new(){Id=id,Car=data.Enrich(car),Eligible=true,Pending=true,ParticipationSource="pending",Budget=Number(data.Rules["budgets"]![e.Group]),Cost=car.Cost,Value=data.Lookup(car).Value,Reason="סכום ההשתתפות אינו ידוע; נדרש אישור נציג"});continue;}
             var values=Calculate(e,car,part);
             results.Add(new(values){Id=id,Car=car is null?null:data.Enrich(car),Eligible=true,Reason=reason,
+                ParticipationSource=car is null?"none":pending?.Contains(id)==true?"pending":part is null?"catalogue":participationSources?.GetValueOrDefault(id)??"representative",
                 Delta=values.Net-before.Net,Annual=(values.Net-before.Net)*12m,Pending=pending?.Contains(id)==true,
                 Explanation=pending?.Contains(id)==true?null:NetExplanation.Compare(before,values)});
         }

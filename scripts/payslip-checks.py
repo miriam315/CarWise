@@ -83,6 +83,16 @@ def check(query,page,nav,screenshots):
     expect(page.locator('.payslip-panel .error-banner')).not_to_contain_text('SYNTHETIC ADMIN DIAGNOSTIC')
     expect(page.locator('.payslip-review')).to_have_count(0);assert len(failed)==1
     page.unroute('**/api/payslip/extract?**',failure)
+    limits=[]
+    def output_limit(route):
+        limits.append(route.request.url)
+        route.fulfill(status=503,json={'error':'Generic extraction failure','details':'SYNTHETIC TOKEN DIAGNOSTIC','code':'output_limit'})
+    page.route('**/api/payslip/extract?**',output_limit);send.click()
+    expect(page.locator('.payslip-panel .error-banner')).to_contain_text('לא הועברו נתונים חלקיים')
+    expect(page.locator('.payslip-panel .error-banner')).not_to_contain_text('SYNTHETIC TOKEN DIAGNOSTIC')
+    expect(page.locator('.payslip-review')).to_have_count(0);assert len(limits)==1
+    page.unroute('**/api/payslip/extract?**',output_limit)
+
     # Server itself rejects missing consent, even if a caller bypasses the UI.
     response=page.request.post(page.url.split('/')[0]+'//'+page.url.split('/')[2]+'/api/payslip/extract?employee='+query('/data')['employees'][0]['id'],data=b'%PDF-1.4 test')
     assert response.status==400

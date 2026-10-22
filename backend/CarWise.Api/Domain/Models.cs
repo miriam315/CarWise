@@ -72,6 +72,7 @@ public sealed record Alternative : Amounts
     public string Reason { get; init; } = "";
     public decimal Delta { get; init; }
     public decimal Annual { get; init; }
+    public string ParticipationSource {get;init;}="catalogue";
     public bool Pending { get; init; }
     public NetExplanation? Explanation { get; init; }
     public Alternative(Amounts a) : base(a) { }

@@ -23,11 +23,11 @@ def check(page,query,nav,screenshots):
   probes.append(route.request.post_data_json)
   route.fulfill(status=200,content_type='application/json',body=json.dumps({'success':True,'code':'ok','message':'בדיקת טיוטה תקינה'}))
  page.route('**/api/admin/test-ai',probe)
- page.get_by_label('מגבלת טוקנים לפלט',exact=True).fill('8192')
+ page.get_by_label('מגבלת טוקנים לפלט',exact=True).fill('65536')
  page.get_by_label('זמן המתנה כולל (שניות)',exact=True).fill('60')
  page.get_by_role('button',name='בדיקת חיבור עם גיבוי',exact=True).click()
  expect(page.locator('.admin-test')).to_contain_text('בדיקת טיוטה תקינה')
- assert probes[-1]['profile']['maxOutputTokens']==8192 and probes[-1]['profile']['timeoutSeconds']==60
+ assert probes[-1]['profile']['maxOutputTokens']==65536 and probes[-1]['profile']['timeoutSeconds']==60
  assert probes[-1]['apiKeys']['primary']=='TEST-ONLY-PDF-PRIMARY'
  assert len(probes[-1]['apiKeys'])==3 and 'apiKey' not in probes[-1]
  page.get_by_label('זמן המתנה כולל (שניות)',exact=True).fill('91')
@@ -42,11 +42,11 @@ def check(page,query,nav,screenshots):
  assert probes[-1]['apiKey']=='TEST-ONLY-PDF-PRIMARY' and 'apiKeys' not in probes[-1]
  assert probes[-1]['profile']['maxOutputTokens']==128 and probes[-1]['profile']['timeoutSeconds']==90
  # A hidden invalid model must be named when saving another model with valid values.
- page.get_by_label('מגבלת טוקנים לפלט',exact=True).fill('127')
+ page.get_by_label('מגבלת טוקנים לפלט',exact=True).fill('0')
  page.locator('.ai-model-list button').first.click()
  page.get_by_role('button',name='שמירת הגדרות',exact=True).click()
  expect(page.locator('.admin-page .error-banner')).to_contain_text('PDF browser test')
- expect(page.locator('.admin-page .error-banner')).to_contain_text('127')
+ expect(page.locator('.admin-page .error-banner')).to_contain_text('0')
  page.locator('.ai-model-list button').filter(has_text='PDF browser test').click()
  page.get_by_label('מגבלת טוקנים לפלט',exact=True).fill('1200')
  page.get_by_label('זמן המתנה כולל (שניות)',exact=True).fill('35')
