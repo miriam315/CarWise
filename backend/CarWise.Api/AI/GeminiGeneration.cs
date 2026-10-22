@@ -10,8 +10,9 @@ public static class GeminiGeneration
         if(mode=="auto")
         {
             var model=profile.Model.Replace("models/","",StringComparison.Ordinal).ToLowerInvariant();
-            mode=!document?"default":model.StartsWith("gemini-2.5-flash",StringComparison.Ordinal)?"off":
-                model.StartsWith("gemini-3",StringComparison.Ordinal)?(model.Contains("flash",StringComparison.Ordinal)?"minimal":"low"):"default";
+            mode=!document?"default":model is "gemini-2.5-flash" or "gemini-2.5-flash-lite"?"off":
+                model is "gemini-3-flash-preview"?"minimal":
+                model is "gemini-3-pro-preview" or "gemini-3.1-pro-preview"?"low":"default";
         }
         if(mode=="off")result["thinkingConfig"]=new JsonObject{["thinkingBudget"]=0};
         else if(mode is "minimal" or "low")result["thinkingConfig"]=new JsonObject{["thinkingLevel"]=mode};

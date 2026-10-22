@@ -10,6 +10,9 @@ public sealed class AiProviderException(int status,string code) : AiUnavailableE
     status is 401 or 403?"הספק דחה את המפתח או את הרשאותיו.":
     status==429?"הספק הגביל את קצב הקריאות או את המכסה. בדקו את מגבלות החשבון או נסו מפתח בעל מכסה נפרדת.":
     status==404?"המודל או נתיב ה־API לא נמצאו אצל הספק. בדקו את שם המודל, הכתובת והרשאת החשבון למודל.":
+    code=="invalid_thinking_config"?"הספק דחה את הגדרת החשיבה. בחרו בניהול המודל ׳ברירת מחדל של הספק׳ או מצב חשיבה הנתמך במודל המסוים, שמרו ונסו שוב.":
+    code=="invalid_output_tokens"?"הספק דחה את מגבלת טוקני הפלט. הגדירו בניהול ערך הנתמך במודל המסוים; המערכת אינה משנה את הערך שהמנהל בחר.":
+    code=="invalid_json_schema"?"הספק דחה את הגדרת הפלט המובנה או את סכמת JSON. בדקו שהמודל וגרסת ה־API תומכים בפלט מובנה למסמכים.":
     status is 400 or 422?"הספק דחה את מבנה הבקשה. בדקו התאמה של המודל לפורמט API ול־JSON Schema; טווח טוקנים תקין במערכת אינו מבטיח שהמודל תומך בכל הפרמטרים.":
     status is 503 or 529?"שירות הספק עמוס או לא זמין כרגע. נסו שוב מאוחר יותר.":$"שירות הספק החזיר שגיאה ({status}).",code)
 {
@@ -26,10 +29,23 @@ public sealed class AiProviderException(int status,string code) : AiUnavailableE
             var body=JsonNode.Parse(await response.Content.ReadAsStringAsync(ct));
             usage=new JsonObject{["usage"]=body?["usage"]?.DeepClone(),["usageMetadata"]=body?["usageMetadata"]?.DeepClone()};
             var value=body?["error"]?["code"]?.ToString()??body?["error"]?["type"]?.ToString()??body?["error"]?["status"]?.ToString()??"provider_error";
+            if(int.TryParse(value,out _) && body?["error"]?["status"] is JsonValue statusValue)value=statusValue.ToString();
             if(Regex.IsMatch(value,@"^[A-Za-z0-9_-]{1,80}$"))code=value;
             var param=body?["error"]?["param"]?.ToString();
             if(param is "model" or "max_tokens" or "max_completion_tokens" or "response_format" or "response_format.json_schema"
                 or "generationConfig.maxOutputTokens" or "generationConfig.responseJsonSchema" or "output_config")parameter=param;
+            // Inspect provider diagnostics only to select fixed, safe labels. Never echo or store
+            // its message/field descriptions: they can contain document text or credentials.
+            if(body?["error"]?["status"] is JsonValue && response.StatusCode is (System.Net.HttpStatusCode.BadRequest or System.Net.HttpStatusCode.UnprocessableEntity))
+            {
+                var diagnostic=body?["error"]?.ToJsonString()??"";
+                if(Regex.IsMatch(diagnostic,@"thinking_?(config|budget|level)",RegexOptions.IgnoreCase))
+                {code="invalid_thinking_config";parameter="generationConfig.thinkingConfig";}
+                else if(Regex.IsMatch(diagnostic,@"max_?(output_?tokens|completion_?tokens|tokens)",RegexOptions.IgnoreCase))
+                {code="invalid_output_tokens";parameter="generationConfig.maxOutputTokens";}
+                else if(Regex.IsMatch(diagnostic,@"response_?(json_?schema|schema)|json_?schema",RegexOptions.IgnoreCase))
+                {code="invalid_json_schema";parameter="generationConfig.responseJsonSchema";}
+            }
         }
         catch(Exception error)when(error is System.Text.Json.JsonException or InvalidOperationException){ }
         var retry=response.Headers.RetryAfter;

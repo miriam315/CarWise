@@ -22,6 +22,7 @@ public sealed record ExtractedData
     public bool WantsElectric {get;init;}
     public string? RequestedModel {get;init;}
     public VehicleKey? VehicleKey {get;init;}
+    public string[] QuestionTopics {get;init;}=[];
     public bool HasUpdates => Salary is not null || Commission is not null || Bonus is not null || Pension is not null ||
         Fund is not null || Credits is not null || Children is not null || Occupation is not null;
     public Employee Apply(Employee e)=>e with{Salary=Salary??e.Salary,Commission=Commission??e.Commission,Bonus=Bonus??e.Bonus,
@@ -42,7 +43,9 @@ public sealed class LocalExtractionService : IDataExtractionService
             var m=Regex.Match(text,pattern,RegexOptions.None,TimeSpan.FromMilliseconds(100));
             return m.Success?decimal.Parse(m.Groups[1].Value.Replace(",",""),CultureInfo.InvariantCulture):null;
         }
+        var topics=AdvisorKnowledge.Identify(text);
         return Task.FromResult(new ExtractedData{
+            QuestionTopics=topics,
             Salary=Match(@"(?:שכר(?:\s+בסיס)?|בסיס)\s*[:=]?\s*([\d,]+(?:\.\d+)?)"),
             Commission=Match(@"עמלות\s*[:=]?\s*([\d,]+(?:\.\d+)?)"),Bonus=Match(@"בונוס\s*[:=]?\s*([\d,]+(?:\.\d+)?)"),
             Pension=Match(@"פנסיה\s*[:=]?\s*([\d,]+(?:\.\d+)?)"),Fund=Match(@"קרן השתלמות\s*[:=]?\s*([\d,]+(?:\.\d+)?)"),
@@ -50,8 +53,8 @@ public sealed class LocalExtractionService : IDataExtractionService
             TargetParticipation=Match(@"השתתפות(?:\s+שלי)?\s+(?:ב|ל)(?:רכב\s+ה?חדש|חלופה)\s*[:=]?\s*([\d,]+(?:\.\d+)?)"),
             ParticipationNeedsApproval=ParticipationRules.ApprovalRequested(text),
             RequestedModel=ParticipationRules.OutsideCatalogue(text)?text:null,
-            IsWaiverRequested=new[]{"לוותר","אוותר","מוותר","ויתור","בלי רכב","אחזקת רכב"}.Any(text.Contains),
-            WantsElectric=new[]{"חשמל","חסכ","כדאי"}.Any(text.Contains)
+            IsWaiverRequested=!topics.Contains("waiver_rules")&&new[]{"לוותר","אוותר","מוותר","ויתור","בלי רכב","אחזקת רכב"}.Any(text.Contains),
+            WantsElectric=!topics.Contains("electric_rules")&&new[]{"חשמל","חסכ","כדאי"}.Any(text.Contains)
         });
     }
 }
@@ -60,6 +63,7 @@ public sealed class AiExtractionService(IAiCompletionClient gateway,string manag
     public string Mode=>"ai";
     internal static readonly JsonNode Schema=JsonNode.Parse("""
     {"type":"object","additionalProperties":false,"properties":{
+     "questionTopics":{"type":"array","items":{"type":"string","enum":["group","budget","current_car","current_participation","eligible_cars","waiver_rules","family_rules","electric_rules","calculation"]}},
      "salary":{"type":["number","null"]},"commission":{"type":["number","null"]},"bonus":{"type":["number","null"]},
      "pension":{"type":["number","null"]},"fund":{"type":["number","null"]},"credits":{"type":["number","null"]},
      "children":{"type":["number","null"]},"occupation":{"type":["string","null"]},
@@ -69,7 +73,7 @@ public sealed class AiExtractionService(IAiCompletionClient gateway,string manag
       "taxYear":{"type":"integer"},"registrationYear":{"type":"integer"},"vehicleType":{"type":"string"},
       "makerCode":{"type":"string"},"modelCode":{"type":"string"}},
       "required":["taxYear","registrationYear","vehicleType","makerCode","modelCode"]}]}},
-     "required":["salary","commission","bonus","pension","fund","credits","children","occupation","targetParticipation","participationNeedsApproval","isWaiverRequested","wantsElectric","requestedModel","vehicleKey"]}
+     "required":["questionTopics","salary","commission","bonus","pension","fund","credits","children","occupation","targetParticipation","participationNeedsApproval","isWaiverRequested","wantsElectric","requestedModel","vehicleKey"]}
     """)!;
     public async Task<ExtractedData> ExtractAsync(string text,Employee known,IReadOnlyList<Message> history,CancellationToken ct)
     {
@@ -80,6 +84,8 @@ public sealed class AiExtractionService(IAiCompletionClient gateway,string manag
             "Percentage fields are percentage points (6, not .06). Only extract a full vehicleKey if ALL key parts are explicitly given. "+
             "requestedModel is only a textual hint, never an authoritative vehicle identity. isWaiverRequested only when the user asks to waive a car, not when describing current maintenance. "+
             "targetParticipation is only an explicitly stated employee contribution for a NEW/ALTERNATIVE vehicle, never for their current car. participationNeedsApproval is true when they ask for representative confirmation or say their alternative contribution differs/unknown. "+
+            "For questions about existing facts/policy, set questionTopics to the relevant allowed topics (group, budget, current_car, current_participation, eligible_cars, waiver_rules, family_rules, electric_rules, calculation). "+
+            "For informational policy questions, do not also set wantsElectric or isWaiverRequested unless the user explicitly asks to simulate a change. For example לאיזה קבוצה אני שייכת asks for group, not an occupation change. Classify questions only; the server supplies all answers from authoritative data. Use [] for unrelated subjects. "+
             "Do not infer occupation from salary. Do not include prose.",text,ct);
         var extracted=JsonDefaults.Read<ExtractedData>(result);
         // Reject numerical fields unsupported by the current message even if a provider hallucinates them.

@@ -3,7 +3,7 @@ using CarWise.Api.Infrastructure;
 namespace CarWise.Api.Domain;
 
 public sealed class AdvisorService(ReferenceData data,PayrollEngine engine,Repository repository,
-    IDataExtractionService extraction,IResponseNarrationService narration,AdvisorTiming? timing=null,FleetService? fleet=null)
+    IDataExtractionService extraction,IResponseNarrationService narration,AdvisorTiming? timing=null,FleetService? fleet=null,ILogger<AdvisorService>? logger=null)
 {
     private readonly AdvisorTiming limits=(timing??AdvisorTiming.Default).Validate();
     private static readonly Dictionary<string,string> Aliases=new(){["אטו"]="CAR-10",["atto"]="CAR-10",["קרניבל"]="CAR-19",
@@ -72,11 +72,32 @@ public sealed class AdvisorService(ReferenceData data,PayrollEngine engine,Repos
             using var ai=CancellationTokenSource.CreateLinkedTokenSource(ct);ai.CancelAfter(limits.Extraction);
             try{fields=await extraction.ExtractAsync(text,e,history,ai.Token).WaitAsync(ai.Token);}
             catch(Exception error)when(!ct.IsCancellationRequested&&error is AiUnavailableException or HttpRequestException or OperationCanceledException)
-            {aiFallback=true;fields=await new LocalExtractionService().ExtractAsync(text,e,[],ct);}
+            {
+                logger?.LogWarning("AI conversation extraction failed; local guidance used. Code={Code}, HTTP={Status}",
+                    error is AiUnavailableException unavailable?unavailable.Code:error is OperationCanceledException?"timeout":"network_error",
+                    error is AiProviderException provider?provider.Status:(int?)null);
+                aiFallback=true;fields=await new LocalExtractionService().ExtractAsync(text,e,[],ct);
+            }
             if(!canChangeOccupation&&fields.Occupation is not null&&fields.Occupation!=e.Occupation)throw new UnauthorizedAccessException("Forbidden");
             e=IntakeFields.Apply(e,fields);
         }
         e=engine.Validate(e);
+        // Answer known profile/policy questions before payroll intake. Asking one's group
+        // must not require a complete payslip or change the pending comparison.
+        if(!answered&&request.Target is null&&!fields.HasUpdates&&!fields.WantsElectric&&!fields.IsWaiverRequested&&fields.RequestedModel is null)
+        {
+            var topics=(fields.QuestionTopics??[]).Concat(AdvisorKnowledge.Identify(text)).Distinct().ToArray();
+            var explanation=AdvisorKnowledge.Answer(topics,e,data,engine);
+            if(explanation.Length>0)
+            {
+                using var budget=CancellationTokenSource.CreateLinkedTokenSource(ct);budget.CancelAfter(limits.Narration);
+                var facts=explanation.Split("\n\n",StringSplitOptions.RemoveEmptyEntries);
+                string response;
+                try{response=await narration.ExplainFactsAsync(facts,budget.Token).WaitAsync(budget.Token);}
+                catch(OperationCanceledException)when(!ct.IsCancellationRequested){response=explanation;}
+                return await ReplyAsync(e,state,text,response,[],ct,aiFallback);
+            }
+        }
         var lower=text.ToLowerInvariant();var candidates=new List<string>();var target=answered?state.Target:request.Target;
         if(target is null&&(awaiting is not null||fields.HasUpdates||text is "נמשיך" or "המשך" or "מה התשובה"))target=state.Target;
         if((awaiting=="targetParticipation"||fields.TargetParticipation is not null||fields.ParticipationNeedsApproval||ParticipationRules.ApprovalRequested(text))&&target is null)target=state.Target;
@@ -161,7 +182,11 @@ public sealed class AdvisorService(ReferenceData data,PayrollEngine engine,Repos
         using var budget=CancellationTokenSource.CreateLinkedTokenSource(ct);budget.CancelAfter(limits.Narration);
         try{return await narration.NarrateAsync(result,budget.Token).WaitAsync(budget.Token);}
         catch(Exception error)when(!ct.IsCancellationRequested&&error is AiUnavailableException or HttpRequestException or OperationCanceledException)
-        {return FinancialText.Template(result);}
+        {
+            logger?.LogWarning("AI comparison narration failed; payroll template used. Code={Code}",
+                error is AiUnavailableException unavailable?unavailable.Code:error is OperationCanceledException?"timeout":"network_error");
+            return FinancialText.Template(result);
+        }
     }
     private async Task<object> ReplyAsync(Employee employee,AdvisorState state,string text,string reply,List<string> candidates,CancellationToken ct,bool aiFallback=false)
     {

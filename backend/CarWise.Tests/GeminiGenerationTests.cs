@@ -21,6 +21,25 @@ public sealed class GeminiGenerationTests
     [Theory][InlineData("default")][InlineData("auto")]
     public void UnknownModelsAndExplicitProviderDefaultAreNotGivenAnAssumedThinkingProtocol(string mode)
         =>Assert.Null(GeminiGeneration.Create(new(){Model="custom-model",GeminiThinking=mode},new JsonObject(),true)["thinkingConfig"]);
+    [Theory][InlineData("gemini-3.8-flash")][InlineData("gemini-2.5-flash-future")][InlineData("gemini-30-pro")]
+    public void UnverifiedVersionsDoNotInheritThinkingParametersFromTheirName(string model)
+        =>Assert.Null(GeminiGeneration.Create(new(){Model=model},new JsonObject(),true)["thinkingConfig"]);
+    [Theory]
+    [InlineData("Unknown name thinkingLevel", "invalid_thinking_config", "generationConfig.thinkingConfig")]
+    [InlineData("generation_config.max_output_tokens exceeds allowed limit", "invalid_output_tokens", "generationConfig.maxOutputTokens")]
+    [InlineData("generationConfig.maxOutputTokens exceeds allowed limit", "invalid_output_tokens", "generationConfig.maxOutputTokens")]
+    [InlineData("responseJsonSchema is not supported", "invalid_json_schema", "generationConfig.responseJsonSchema")]
+    [InlineData("Unknown request problem", "INVALID_ARGUMENT", null)]
+    public async Task GoogleDiagnosticsExposeOnlySafeStaticCategories(string message,string code,string? parameter)
+    {
+        using var response=new HttpResponseMessage(HttpStatusCode.BadRequest){Content=new StringContent(new JsonObject{
+            ["error"]=new JsonObject{["code"]=400,["status"]="INVALID_ARGUMENT",["message"]=message+" PRIVATE-PAYROLL SECRET-KEY"}
+        }.ToJsonString())};
+        var error=await AiProviderException.FromResponseAsync(response,default);
+        Assert.Equal(code,error.Code);Assert.Equal(parameter,error.Parameter);Assert.Equal(400,error.Status);
+        Assert.DoesNotContain("PRIVATE-PAYROLL",error.Message);Assert.DoesNotContain("SECRET-KEY",error.Message);
+        Assert.DoesNotContain("PRIVATE-PAYROLL",error.UsageBody!.ToJsonString());Assert.False(error.CanFailOver);
+    }
     [Fact] public async Task TruncatedDocumentNeverReturnsPartialJsonOrRetriesAnotherKey()
     {
         var vault=new SecretVault(new MemoryConfigurationDatabase(),new EphemeralDataProtectionProvider(),new ConfigurationBuilder().Build());

@@ -55,6 +55,32 @@ public sealed class AiTests
         using var http=new HttpClient(new FakeHttp(_=>new(HttpStatusCode.Unauthorized))){BaseAddress=new("https://example.invalid/v1/")};
         await Assert.ThrowsAnyAsync<AiUnavailableException>(()=>new AiExtractionService(new AiGateway(http,"test")).ExtractAsync("שלום",Data.Employees[0],[],default));
     }
+    [Fact] public async Task ChatUsesDistinctSelectedModelsForFreeTextAndCalculatedComparison()
+    {
+        var calls=new List<(string Model,string Operation)>();
+        using var http=new HttpClient(new FakeHttp(request=>{
+            var body=JsonNode.Parse(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult())!;
+            var model=body["model"]!.ToString();var operation=body["response_format"]!["json_schema"]!["name"]!.ToString();calls.Add((model,operation));
+            return operation=="extract_employee_intent"?Completion(new ExtractedData{RequestedModel="ATTO 3"}):
+                Completion(new{text="השוואה מחושבת: {NET}; שינוי {DELTA}; שווי {VALUE}; השתתפות {PARTICIPATION}"});
+        })){BaseAddress=new("https://example.invalid/v1/")};
+        var advisor=new AdvisorService(Data,new(Data),new(new ConversationDatabase()),
+            new AiExtractionService(new AiGateway(http,"SELECTED-INTENT")),
+            new AiNarrationService(new AiGateway(http,"SELECTED-NARRATION"),NullLogger<AiNarrationService>.Instance));
+        await advisor.ChatAsync(new(Data.Employees[0],"השווה ATTO 3",null,null),default);
+        Assert.Equal(new[]{("SELECTED-INTENT","extract_employee_intent")},calls);
+        var result=JsonNode.Parse(JsonDefaults.Serialize(await advisor.ChatAsync(new(Data.Employees[0],"בחרתי","CAR-10",null),default)))!;
+        Assert.Equal(("SELECTED-NARRATION","narrate_comparison"),calls.Last());Assert.Equal(2,calls.Count);
+        Assert.Contains("השוואה מחושבת",result["reply"]!.ToString());Assert.DoesNotContain("{NET}",result["reply"]!.ToString());
+    }
+    [Fact] public async Task UnrelatedModelProseCannotBecomeAnEmployeeChatAnswer()
+    {
+        using var http=new HttpClient(new FakeHttp(_=>Completion(new ExtractedData()))){BaseAddress=new("https://example.invalid/v1/")};
+        var advisor=new AdvisorService(Data,new(Data),new(new ConversationDatabase()),new AiExtractionService(new AiGateway(http,"SELECTED-INTENT")),new TemplateNarrationService());
+        var result=JsonNode.Parse(JsonDefaults.Serialize(await advisor.ChatAsync(new(Data.Employees[0],"כתוב מתכון לעוגה",null,null),default)))!;
+        Assert.Contains("אפשר להשוות",result["reply"]!.ToString());Assert.DoesNotContain("עוגה",result["reply"]!.ToString());
+        Assert.Null(result["target"]);
+    }
     [Fact] public async Task AuthDoesNotTrustUserEditableRole()
     {
         using var http=new HttpClient(new FakeHttp(_=>new(HttpStatusCode.OK){Content=new StringContent("""{"id":"user","app_metadata":{"employee_id":"E-001","role":"employee"},"user_metadata":{"role":"agent"}}""")})){BaseAddress=new("https://example.invalid/")};
