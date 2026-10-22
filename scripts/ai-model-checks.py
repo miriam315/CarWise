@@ -5,6 +5,15 @@ from playwright.sync_api import expect
 def check(page,query,nav,screenshots):
  baseline=query('/admin/configuration')
  nav('ניהול המערכת');page.get_by_role('tab',name='ספקי AI',exact=True).click()
+ toggle=page.get_by_label('הפעלת AI חיצוני בשיחה',exact=True)
+ saved_enabled=baseline['configuration']['ai']['enabled']
+ expect(toggle).to_be_checked(checked=saved_enabled)
+ toggle.set_checked(not saved_enabled)
+ expect(page.get_by_label('שינוי מצב AI בטיוטה',exact=True)).to_be_visible()
+ expect(page.get_by_label('מצב AI שמור בשיחה',exact=True)).to_contain_text('AI חיצוני מופעל' if saved_enabled else 'שיחה מקומית לפי כללים')
+ toggle.set_checked(saved_enabled)
+ expect(page.get_by_label('שינוי מצב AI בטיוטה',exact=True)).to_have_count(0)
+
  page.get_by_role('button',name='הוספת מודל',exact=True).click()
  page.get_by_label('שם המודל בקטלוג',exact=True).fill('PDF browser test')
  editor=page.locator('.ai-model-editor')

@@ -34,10 +34,29 @@ public static class IntakeFields
         "participation"=>"מה ההשתתפות החודשית שלך ברכב הנוכחי? אם אין השתתפות, כתבו 0; אם הסכום לא ידוע, כתבו ״לא יודע״ ואפנה לנציג.",
         _=>throw new ArgumentException("Unknown intake field")};
     public static bool IsUnknown(string text)=>Regex.IsMatch(text,@"^(?:לא (?:יודע(?:ת)?|ידוע)|אין לי מושג|צריך(?:ה)? נציג)[.!?]?$",RegexOptions.CultureInvariant,TimeSpan.FromMilliseconds(100));
+    private static string AnswerText(string text,string field)
+    {
+        var label=field switch{
+            "salary"=>@"(?:שכר(?:\s+ה?בסיס)?|בסיס)","commission"=>"עמלות", "bonus"=>"בונוס",
+            "pension"=>@"(?:פנסיה|אחוז\s+(?:הפרשת\s+העובד\s+)?(?:ההפרשה\s+)?לפנסיה)",
+            "fund"=>@"(?:קרן\s+השתלמות|הפרשה\s+לקרן\s+השתלמות)","credits"=>"נקודות זיכוי",
+            "children"=>"ילדים", "participation"=>@"השתתפות(?:\s+(?:ברכב\s+הנוכחי|הנוכחית))?",_=>null};
+        if(label is null)return text.Trim();
+        var match=Regex.Match(text.Trim(),@"^(?:ה)?"+label+@"(?:\s+שלי)?(?:\s+(?:הוא|היא|הן))?\s*[:=]?\s*(?<value>.+)$",RegexOptions.CultureInvariant,TimeSpan.FromMilliseconds(100));
+        return match.Success?match.Groups["value"].Value:text.Trim();
+    }
+    public static bool TryAnswerNumber(string text,string field,out decimal value)=>TryNumber(AnswerText(text,field),field,out value);
+    public static bool IsNumericAnswer(string text,string field)
+    {
+        if(field=="currentCar")return false;
+        var value=AnswerText(text,field);
+        return Regex.IsMatch(value,@"\d",RegexOptions.CultureInvariant,TimeSpan.FromMilliseconds(100))&&
+            Regex.IsMatch(value,"""^[\d, .%₪ש״ח"'+\-]+$""",RegexOptions.CultureInvariant,TimeSpan.FromMilliseconds(100));
+    }
     public static bool TryNumber(string text,string field,out decimal value)
     {
         value=0;if(field=="currentCar")return false;
-        var match=Regex.Match(text.Trim(),@"^(?:₪\s*)?(\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)\s*(%|₪|שח|ש״ח)?$",RegexOptions.CultureInvariant,TimeSpan.FromMilliseconds(100));
+        var match=Regex.Match(text.Trim(),"""^(?:₪\s*)?(\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)\s*(%|₪|ש[״"']?ח)?$""",RegexOptions.CultureInvariant,TimeSpan.FromMilliseconds(100));
         if(!match.Success||!decimal.TryParse(match.Groups[1].Value.Replace(",",""),NumberStyles.AllowDecimalPoint,CultureInfo.InvariantCulture,out value))return false;
         var max=field=="children"?30:PayslipFields.Limits[field];
         return value<=max&&(field!="children"||decimal.Truncate(value)==value)&&(!match.Groups[2].Success||((field is "pension" or "fund")?match.Groups[2].Value=="%":field is not ("children" or "credits")&&match.Groups[2].Value!="%"));

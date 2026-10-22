@@ -85,6 +85,43 @@ public sealed class AdvisorIntakeTests
     [Theory][InlineData("6%","pension",true)][InlineData("6 ₪","pension",false)][InlineData("2.5%","credits",false)]
     [InlineData("30.5","children",false)][InlineData("-1","salary",false)][InlineData("200001","salary",false)][InlineData("1 2","bonus",false)]
     public void ShortAnswersRequireCorrectUnitsAndRange(string text,string field,bool expected)=>Assert.Equal(expected,IntakeFields.TryNumber(text,field,out _));
+    [Theory]
+    [InlineData("14200 ש\"ח",false)][InlineData("השכר שלי 14200 ש\"ח",false)]
+    [InlineData("14200 ש\"ח",true)][InlineData("השכר שלי 14200 ש\"ח",true)]
+    [InlineData("השכר שלי הוא 14,200 ש״ח",true)][InlineData("שכר הבסיס שלי: 14200 ₪",true)]
+    public async Task SavedSalaryAnswerIsAcceptedBeforeThePlannerAndSurvivesReload(string answer,bool withTools)
+    {
+        var db=new ConversationDatabase();var employee=Data.Employees[0] with{KnownFields=[]};
+        var first=await Chat(Service(db),employee,"אני שוקל לעבור לרכב חשמלי, כמה זה ישנה לי בנטו?");
+        Assert.Equal("salary",first["awaitingField"]!.ToString());
+        var planner=new ScriptedToolClient();
+        var advisor=withTools?new AdvisorService(Data,new(Data),new(db),new LocalExtractionService(),new TemplateNarrationService(),
+            tools:new(planner,Data,new(Data),new(db),Microsoft.Extensions.Logging.Abstractions.NullLogger<AdvisorToolConversation>.Instance)):Service(db);
+        var response=await Chat(advisor,employee,answer);
+        Assert.Equal(14200,Returned(response).Salary);Assert.True(IntakeFields.Known(Returned(response),"salary"));
+        Assert.Equal("commission",response["awaitingField"]!.ToString());Assert.DoesNotContain(IntakeFields.Question("salary",Data),response["reply"]!.ToString());
+        Assert.True(Returned(response).AdvisorState!.WantsElectric);Assert.Equal(0,planner.Calls);
+        var saved=await new Repository(db).ConversationAsync(employee.Id);Assert.Equal(14200,saved!.Employee.Salary);
+        response=await Chat(Service(db),employee,"העמלות שלי הן 0 ש\"ח");
+        Assert.Equal(14200,Returned(response).Salary);Assert.Equal("bonus",response["awaitingField"]!.ToString());
+        Assert.Equal(6,db.Messages.Count);
+    }
+    [Theory][InlineData("שכר הבסיס שלי 200001 ש\"ח")][InlineData("14200%")][InlineData("-100 ש\"ח")]
+    public async Task InvalidSavedSalaryAnswerIsRejectedWithoutCallingThePlannerOrSavingIt(string text)
+    {
+        var db=new ConversationDatabase();var employee=Data.Employees[0] with{KnownFields=[]};
+        await Chat(Service(db),employee,"השווה לחשמלי");var planner=new ScriptedToolClient();
+        var advisor=new AdvisorService(Data,new(Data),new(db),new LocalExtractionService(),new TemplateNarrationService(),tools:new(planner,Data,new(Data),new(db),Microsoft.Extensions.Logging.Abstractions.NullLogger<AdvisorToolConversation>.Instance));
+        var response=await Chat(advisor,employee,text);Assert.Contains("הערך אינו תקין",response["reply"]!.ToString());
+        Assert.Equal("salary",response["awaitingField"]!.ToString());Assert.False(IntakeFields.Known(Returned(response),"salary"));Assert.Equal(0,planner.Calls);
+    }
+    [Fact] public void LabelledAnswersCannotTurnAnotherFieldOrAHypotheticalIntoBaseSalary()
+    {
+        Assert.False(IntakeFields.TryAnswerNumber("הבונוס שלי 14200", "salary",out _));
+        Assert.False(IntakeFields.TryAnswerNumber("אם השכר שלי יהיה 14200 ש\"ח מה יקרה?", "salary",out _));
+        Assert.False(IntakeFields.TryAnswerNumber("השכר שלי 14200 והבונוס 1000", "salary",out _));
+        Assert.False(IntakeFields.TryAnswerNumber("פנסיה 6 ש\"ח", "pension",out _));
+    }
     [Fact] public async Task SequentialAnswersSurviveNewServiceInstancesAndAskOnlyMissingFields()
     {
         var db=new ConversationDatabase();var employee=Data.Employees[0] with{KnownFields=[]};

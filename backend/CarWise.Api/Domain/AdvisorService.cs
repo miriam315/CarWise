@@ -44,8 +44,9 @@ public sealed class AdvisorService(ReferenceData data,PayrollEngine engine,Repos
         e=await RefreshKnownParticipationAsync(e,ct);
         var state=e.AdvisorState??new AdvisorState();
         if(AdvisorScope.ClearlyUnrelated(text))return await ReplyAsync(e,state,text,AdvisorScope.Redirect,[],ct);
+        var numericAnswer=state.AwaitingField is {} savedField&&IntakeFields.All.Contains(savedField)&&!IntakeFields.Known(e,savedField)&&IntakeFields.IsNumericAnswer(text,savedField);
         var toolUnavailable=false;
-        if(useTools&&tools is not null&&request.Target is null)
+        if(useTools&&tools is not null&&request.Target is null&&!numericAnswer)
         {
             try
             {
@@ -70,7 +71,7 @@ public sealed class AdvisorService(ReferenceData data,PayrollEngine engine,Repos
         ExtractedData fields=suppliedFields??new();var answered=false;var aiFallback=false;
         if(awaiting is not null&&IntakeFields.All.Contains(awaiting)&&!IntakeFields.Known(e,awaiting))
         {
-            if(IntakeFields.TryNumber(text,awaiting,out var number)){e=IntakeFields.Answer(e,awaiting,number);answered=true;}
+            if(IntakeFields.TryAnswerNumber(text,awaiting,out var number)){e=IntakeFields.Answer(e,awaiting,number);answered=true;}
             else if(awaiting=="currentCar")
             {
                 if(request.Target is {} current&&data.Cars.Any(car=>car.Id==current)){e=IntakeFields.Confirm(e with{CurrentCar=current},"currentCar");answered=true;}
@@ -83,7 +84,7 @@ public sealed class AdvisorService(ReferenceData data,PayrollEngine engine,Repos
                 return await ReplyAsync(e,state with{AwaitingField="participation"},text,"חסר סכום ההשתתפות ברכב הנוכחי. שלחתי שאלה לנציג התחבורה; לא אציג נטו עד לקבלת תשובה.",[],ct);
             }
         }
-        if(!answered&&awaiting is not null&&IntakeFields.All.Contains(awaiting)&&System.Text.RegularExpressions.Regex.IsMatch(text,@"^[\d, .%₪ש״ח+\-]+$",System.Text.RegularExpressions.RegexOptions.CultureInvariant,TimeSpan.FromMilliseconds(100)))
+        if(!answered&&awaiting is not null&&IntakeFields.All.Contains(awaiting)&&IntakeFields.IsNumericAnswer(text,awaiting))
             return await ReplyAsync(e,state,text,"הערך אינו תקין לשדה שנשאל. "+IntakeFields.Question(awaiting,data),[],ct);
         if(!answered&&request.Target is null)
         {
