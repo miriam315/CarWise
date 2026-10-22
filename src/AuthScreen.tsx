@@ -2,6 +2,7 @@ import {useEffect,useState} from 'react';
 import {Car,ShieldCheck,ArrowLeft,Lock,AlertCircle,Mail} from 'lucide-react';
 import {api} from './api';
 import StraussLogo from './StraussLogo';
+import ReviewAccounts from './ReviewAccounts';
 export default function AuthScreen(){
  const [first,setFirst]=useState(false),[canCreate,setCanCreate]=useState(false),[email,setEmail]=useState(''),[password,setPassword]=useState(''),[confirm,setConfirm]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState(''),[forgot,setForgot]=useState(false),[recoverySent,setRecoverySent]=useState(false);
  useEffect(()=>{api('/setup/admin/status').then(s=>{setCanCreate(s.needsAdmin);if(s.needsAdmin)setFirst(true)}).catch(()=>{})},[]);
@@ -29,6 +30,6 @@ export default function AuthScreen(){
  {forgot&&<><p className="auth-help">המסך מדגים שחזור סיסמה בלבד; אין שליחת מייל בפועל.</p><button type="button" className="text-button" onClick={back}>חזרה להתחברות</button></>}
  </form>}
  {canCreate&&!first&&!forgot&&<button type="button" className="text-button" onClick={()=>{setFirst(true);setError('')}}>הגדרת מנהל ראשון</button>}
- {!first&&!forgot&&<p className="auth-help">אין לך חשבון? יש לפנות למנהל המערכת.</p>}
+ {!first&&!forgot&&<><p className="auth-help">אין לך חשבון? יש לפנות למנהל המערכת.</p>{import.meta.env.VITE_SHOW_REVIEW_ACCOUNTS!=='false'&&<ReviewAccounts onSelect={(reviewEmail,reviewPassword)=>{setEmail(reviewEmail);setPassword(reviewPassword);setError('')}}/>}</>}
  </section></div>;
 }

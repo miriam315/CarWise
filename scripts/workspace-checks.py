@@ -5,6 +5,19 @@ from playwright.sync_api import expect
 
 def check(query,page,nav,screenshots):
     errors=[];page.on('pageerror',lambda error:errors.append(error.stack or str(error)))
+    # Text can shrink below the old minimum and the chosen size survives reload.
+    size=page.get_by_role('group',name='גודל טקסט',exact=True)
+    expect(size).to_contain_text('80 אחוז')
+    initial_font=page.evaluate('parseFloat(getComputedStyle(document.documentElement).fontSize)')
+    for _ in range(2):page.get_by_role('button',name='הקטנת טקסט',exact=True).click()
+    expect(size).to_contain_text('60 אחוז')
+    expect(page.get_by_role('button',name='הקטנת טקסט',exact=True)).to_be_disabled()
+    assert page.evaluate('parseFloat(getComputedStyle(document.documentElement).fontSize)')<initial_font
+    page.reload()
+    expect(size).to_contain_text('60 אחוז')
+    page.get_by_role('button',name='איפוס גודל הטקסט',exact=True).click()
+    expect(size).to_contain_text('80 אחוז')
+
     nav('קטלוג הרכבים')
     heading=page.get_by_role('heading',name='נעים להכיר. האפשרויות שלך.',exact=True)
     expect(heading).to_be_visible();windows=len(page.context.pages)
@@ -79,6 +92,18 @@ def check(query,page,nav,screenshots):
         login.append(route.request.post_data_json)
         route.fulfill(status=400,json={'error':'בדיקת התחברות בלבד'})
     page.route('**/api/auth/login',probe)
+    review=page.get_by_role('region',name='חשבונות לבדיקה',exact=True)
+    expect(review).to_be_visible();expect(review.locator('li')).to_have_count(5)
+    for account in review.locator('li').all():
+        displayed=account.locator('dd code').all_inner_texts()
+        account.get_by_role('button').click()
+        assert page.get_by_label('דוא״ל להתחברות',exact=True).input_value()==displayed[0]
+        assert page.get_by_label('סיסמה להתחברות',exact=True).input_value()==displayed[1]
+    assert not login # Filling a review account never submits or changes server accounts.
+    page.set_viewport_size({'width':390,'height':844})
+    assert not page.evaluate('document.documentElement.scrollWidth>innerWidth')
+    page.set_viewport_size({'width':1440,'height':1100})
+
     page.get_by_label('דוא״ל להתחברות',exact=True).fill('synthetic@example.invalid')
     page.get_by_label('סיסמה להתחברות',exact=True).fill('Synthetic-password-only!')
     page.get_by_role('button',name='כניסה למערכת',exact=True).click()
