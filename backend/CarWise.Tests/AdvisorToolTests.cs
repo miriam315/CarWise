@@ -64,7 +64,7 @@ public sealed class AdvisorToolTests
     [Fact] public async Task UnrelatedAnswerAndFabricatedFinalNumbersAreNotDisplayed()
     {
         var client=new ScriptedToolClient(_=>Call("decline_unrelated"),_=>Finish("הנה מתכון עם 99999 גרם"));
-        var result=await Chat(Advisor(new(),client),Data.Employees[0],"כתוב מתכון לעוגה");Assert.Contains("ייעוץ",result["reply"]!.ToString());Assert.DoesNotContain("99999",result["reply"]!.ToString());Assert.DoesNotContain("מתכון",result["reply"]!.ToString());
+        var result=await Chat(Advisor(new(),client),Data.Employees[0],"ספר לי על כוכבים");Assert.Contains("ייעוץ",result["reply"]!.ToString());Assert.DoesNotContain("99999",result["reply"]!.ToString());Assert.DoesNotContain("מתכון",result["reply"]!.ToString());
     }
     [Fact] public async Task GuessedVehicleIdsAndUnnecessaryApprovalCannotReplaceDocumentedCatalogueData()
     {

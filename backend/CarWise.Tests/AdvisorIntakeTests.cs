@@ -167,6 +167,17 @@ public sealed class AdvisorIntakeTests
         await new Repository(db).ResolveAsync(ticket.Id,0,"synthetic answer","synthetic answer",default);
         Assert.Empty((await new Repository(db).ParticipationAsync(e.Id)).Overrides);
     }
+    [Theory][InlineData("איזה מחשב כדאי לקנות?")][InlineData("מה כדאי לבשל?")]
+    public async Task UnrelatedQuestionsDoNotReuseSavedElectricIntentOrCandidates(string text)
+    {
+        var employee=Data.Employees[0] with{AdvisorState=new(null,"CAR-10",true,["CAR-10"])};var db=new ConversationDatabase();
+        await new Repository(db).SaveConversationAsync(employee,"CAR-10",default);
+        var result=await Chat(Service(db),employee,text);
+        Assert.Equal(AdvisorScope.Redirect,result["reply"]!.ToString());Assert.Empty(result["candidates"]!.AsArray());
+        Assert.DoesNotContain("הנה רכבים",result["reply"]!.ToString());
+        Assert.Equal(employee.Salary,Returned(result).Salary);Assert.Equal("CAR-10",Returned(result).AdvisorState!.Target);
+        Assert.False((await new LocalExtractionService().ExtractAsync(text,employee,[],default)).WantsElectric);
+    }
     private sealed class SlowExtraction:IDataExtractionService
     {public string Mode=>"ai";public async Task<ExtractedData> ExtractAsync(string text,Employee known,IReadOnlyList<Message> history,CancellationToken ct){await Task.Delay(Timeout.InfiniteTimeSpan,ct);return new();}}
     private sealed class SlowNarration:IResponseNarrationService

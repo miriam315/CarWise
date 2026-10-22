@@ -77,8 +77,8 @@ public sealed class AiTests
     {
         using var http=new HttpClient(new FakeHttp(_=>Completion(new ExtractedData()))){BaseAddress=new("https://example.invalid/v1/")};
         var advisor=new AdvisorService(Data,new(Data),new(new ConversationDatabase()),new AiExtractionService(new AiGateway(http,"SELECTED-INTENT")),new TemplateNarrationService());
-        var result=JsonNode.Parse(JsonDefaults.Serialize(await advisor.ChatAsync(new(Data.Employees[0],"כתוב מתכון לעוגה",null,null),default)))!;
-        Assert.Contains("אפשר להשוות",result["reply"]!.ToString());Assert.DoesNotContain("עוגה",result["reply"]!.ToString());
+        var result=JsonNode.Parse(JsonDefaults.Serialize(await advisor.ChatAsync(new(Data.Employees[0],"ספר לי על כוכבים",null,null),default)))!;
+        Assert.Contains("אפשר להשוות",result["reply"]!.ToString());Assert.DoesNotContain("כוכבים",result["reply"]!.ToString());
         Assert.Null(result["target"]);
     }
     [Fact] public async Task AuthDoesNotTrustUserEditableRole()

@@ -47,5 +47,12 @@ def check(query,page,nav,screenshots):
     expect(vehicle).to_contain_text('אישור נציג');expect(vehicle).to_contain_text('444')
     page.screenshot(path=str(screenshots/'participation-sources.png'))
     page.reload();page.wait_for_selector('.vehicle-card');assert alternative()['participationSource']=='representative'
+    # Unrelated questions must not inherit an earlier electric intent or remembered car choices.
+    chat('מה יקרה לנטו אם אעבור לרכב חשמלי?')
+    for unrelated in ['איזה מחשב כדאי לקנות?', 'מה כדאי לבשל?']:
+        redirected=chat(unrelated)
+        assert 'אני כאן לייעוץ' in redirected['reply'] and redirected['candidates']==[]
+        assert 'הנה רכבים חשמליים' not in redirected['reply'] and 'בחרו את הדגם המדויק' not in redirected['reply']
+    assert alternative()['participation']==444
     assert not errors,errors
     print('PASS: catalogue defaults with provenance, separate actual current contribution, personal alternative amount including zero, disputed comparison withholding, representative precedence, safe out-of-catalogue referral, nonfinancial representative answer and persistence.',flush=True)

@@ -54,7 +54,7 @@ public sealed class LocalExtractionService : IDataExtractionService
             ParticipationNeedsApproval=ParticipationRules.ApprovalRequested(text),
             RequestedModel=ParticipationRules.OutsideCatalogue(text)?text:null,
             IsWaiverRequested=!topics.Contains("waiver_rules")&&new[]{"לוותר","אוותר","מוותר","ויתור","בלי רכב","אחזקת רכב"}.Any(text.Contains),
-            WantsElectric=!topics.Contains("electric_rules")&&new[]{"חשמל","חסכ","כדאי"}.Any(text.Contains)
+            WantsElectric=!topics.Contains("electric_rules")&&new[]{"חשמל"}.Any(text.Contains)
         });
     }
 }

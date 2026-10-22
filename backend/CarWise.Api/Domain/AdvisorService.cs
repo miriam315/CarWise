@@ -43,6 +43,7 @@ public sealed class AdvisorService(ReferenceData data,PayrollEngine engine,Repos
         var e=engine.Validate(profile);
         e=await RefreshKnownParticipationAsync(e,ct);
         var state=e.AdvisorState??new AdvisorState();
+        if(AdvisorScope.ClearlyUnrelated(text))return await ReplyAsync(e,state,text,AdvisorScope.Redirect,[],ct);
         var toolUnavailable=false;
         if(useTools&&tools is not null&&request.Target is null)
         {

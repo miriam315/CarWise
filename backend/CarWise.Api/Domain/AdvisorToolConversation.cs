@@ -178,7 +178,7 @@ public sealed class AdvisorToolConversation(IAiToolClient model,ReferenceData da
                     if(fleet is null||!fleet.Policy.Enabled||!fleet.Policy.ShowToEmployees||!fleet.Policy.SwapEnabled)return "אפשרות ההחלפה הפנימית אינה מופעלת כרגע לעובדים.";
                     if(IntakeFields.Missing(current).Length>0)return "כדי לבדוק החלפה פנימית נדרשת השלמת נתוני העובד תחילה.";
                     return await fleet.Advice(current,args["category"]!.GetValue<string>(),ct);
-                case "decline_unrelated":return "אני כאן לייעוץ על רכב החברה וההשפעה על הנטו. אוכל לעזור בזכאות, בתקציב, בהשוואת רכבים או בבירור מול נציג.";
+                case "decline_unrelated":return AdvisorScope.Redirect;
                 default:throw new ArgumentException("Unknown tool");
             }
         }
