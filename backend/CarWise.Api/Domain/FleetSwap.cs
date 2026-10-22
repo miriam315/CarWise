@@ -159,6 +159,12 @@ public sealed class FleetService(FleetStore store,ConfigurationSnapshot snapshot
             request=own,matches,proposals,categories=new[]{"electric","family","regular"}.Where(cat=>Data.Cars.Any(c=>FleetRules.Accepts(cat,c)&&engine.Eligibility(e,c).Eligible)),
             reserved=FleetRules.Reserved(doc,id),notice="החלפה דורשת הסכמה של שני העובדים ואישור קצין הרכב. אישור אינו מסירה או שינוי שכר. אין הבטחה לביטול עמלות ללא בדיקת החוזים."};
     }
+    public async Task<string> ReplacementAdvice(Employee employee,CancellationToken ct)
+    {
+        var doc=await store.Read(ct);var assignment=Assignment(doc,employee);
+        var status=FleetRules.Replacement(Policy,assignment,DateOnly.FromDateTime(DateTime.UtcNow));
+        return Policy.Enabled?$"לפי מדיניות הצי הפעילה, פרק הזמן הרגיל להחלפה הוא {Policy.ReplacementMonths} חודשים, בכפוף לסיום חוזה או חריג מאושר. "+status.Message:status.Message;
+    }
     public async Task<string> Advice(Employee employee,string category,CancellationToken ct)
     {
         var doc=await store.Read(ct);var a=Assignment(doc,employee);

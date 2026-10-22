@@ -109,7 +109,7 @@ public sealed class Repository(IJsonDatabase db)
     }
     private Task<JsonArray> GeneralTicketRows(Guid id,CancellationToken ct)=>db.ReadAsync("carwise_rules",new Dictionary<string,string>{{"id","catalogue-ticket:"+id}},ct:ct);
     private async Task<JsonNode?> GeneralTicketDocument(Guid id,CancellationToken ct)=>(await GeneralTicketRows(id,ct)).FirstOrDefault()?["document"];
-    public async Task<Ticket> CreateTicketAsync(Employee e,string target,string question,CancellationToken ct=default)
+    public async Task<Ticket> CreateTicketAsync(Employee e,string target,string question,CancellationToken ct=default,bool appendAnnouncement=true)
     {
         if(!ParticipationRules.GeneralTicket(target))return TicketFrom(await db.RpcAsync("carwise_create_ticket",new(){["p_employee"]=JsonNode.Parse(JsonDefaults.Serialize(e)),["p_target"]=target,["p_question"]=question},ct));
         // Nonfinancial catalogue requests do not pretend to be cars or bypass the financial ticket FK.
@@ -121,7 +121,7 @@ public sealed class Repository(IJsonDatabase db)
         if(previous is not null){history.Add(new JsonObject{["answer"]=previous["answer"]?.DeepClone(),["resolved_at"]=previous["resolved_at"]?.DeepClone()});while(history.Count>20)history.RemoveAt(0);}
         var document=new JsonObject{["revision"]=(revision??0)+1,["id"]=id.ToString(),["employee_id"]=e.Id,["snapshot"]=JsonNode.Parse(JsonDefaults.Serialize(e)),["target"]=target,["question"]=question,["status"]="pending",["answer"]=null,["participation"]=null,["created"]=DateTimeOffset.UtcNow.ToString("O"),["history"]=history};
         if(!await db.TryWriteRuleAsync("catalogue-ticket:"+id,revision,document,ct))throw new CarWise.Api.Administration.ConfigurationConflictException();
-        await AddMessageAsync(e.Id,"assistant","הפנייה לגבי הרכב שאינו בקטלוג הועברה לנציג. לא מוצג חישוב כספי לרכב הזה.",ct);
+        if(appendAnnouncement)await AddMessageAsync(e.Id,"assistant","הפנייה לגבי הרכב שאינו בקטלוג הועברה לנציג. לא מוצג חישוב כספי לרכב הזה.",ct);
         await SaveConversationAsync(e,null,ct);return TicketFrom(document);
     }
     public async Task<Ticket> ResolveAsync(Guid id,decimal participation,string answer,string message,CancellationToken ct=default)

@@ -41,6 +41,11 @@ def check(page,query,nav,screenshots):
  expect(page.locator('.admin-test')).to_contain_text('בדיקת טיוטה תקינה')
  assert probes[-1]['apiKey']=='TEST-ONLY-PDF-PRIMARY' and 'apiKeys' not in probes[-1]
  assert probes[-1]['profile']['maxOutputTokens']==128 and probes[-1]['profile']['timeoutSeconds']==90
+ # Native tool compatibility uses the same draft key pool and an explicit probe flag.
+ page.get_by_role('button',name='בדיקת Tool Calling',exact=True).click()
+ expect(page.locator('.admin-test')).to_contain_text('בדיקת טיוטה תקינה')
+ assert probes[-1]['toolCalling'] is True and probes[-1]['apiKeys']['primary']=='TEST-ONLY-PDF-PRIMARY'
+ expect(page.locator('.admin-test')).to_contain_text('Tool Calling')
  # A hidden invalid model must be named when saving another model with valid values.
  page.get_by_label('מגבלת טוקנים לפלט',exact=True).fill('0')
  page.locator('.ai-model-list button').first.click()

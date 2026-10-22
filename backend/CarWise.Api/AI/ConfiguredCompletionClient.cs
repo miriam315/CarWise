@@ -54,11 +54,17 @@ public sealed class AiProviderException(int status,string code) : AiUnavailableE
     }
 }
 /// <summary>Native adapters share a provider-independent structured-completion contract.</summary>
-public sealed class ConfiguredCompletionClient(AiProfile profile,SecretVault vault,IHttpClientFactory clients,string? testKey=null,UsageAccounting? accounting=null,AiKeyHealth? health=null,AiBackupKey? keyToTest=null,IReadOnlyDictionary<string,string>? draftKeys=null) : IAiCompletionClient
+public sealed class ConfiguredCompletionClient(AiProfile profile,SecretVault vault,IHttpClientFactory clients,string? testKey=null,UsageAccounting? accounting=null,AiKeyHealth? health=null,AiBackupKey? keyToTest=null,IReadOnlyDictionary<string,string>? draftKeys=null) : IAiCompletionClient,IAiToolClient
 {
     public Task<string> CompleteAsync(string name,JsonNode schema,string instructions,string text,CancellationToken ct)=>ExecuteAsync(name,schema,instructions,text,null,ct);
     public Task<string> CompleteDocumentAsync(string name,JsonNode schema,string instructions,AiDocument document,CancellationToken ct)=>ExecuteAsync(name,schema,instructions,"Extract the explicitly printed payroll fields from the attached document.",document,ct);
-    private async Task<string> ExecuteAsync(string name,JsonNode schema,string instructions,string text,AiDocument? document,CancellationToken ct)
+    public async Task<AiToolTurn> CallToolsAsync(string instructions,IReadOnlyList<AiTool> tools,IReadOnlyList<AiToolMessage> messages,CancellationToken ct)
+    {
+        try{return CarWise.Api.Domain.JsonDefaults.Read<AiToolTurn>(await ExecuteAsync("advisor_tool_turn",new JsonObject(),instructions,"",null,ct,tools,messages));}
+        catch(Exception error)when(error is System.Text.Json.JsonException or InvalidOperationException or NullReferenceException or FormatException)
+        {throw new AiUnavailableException("הספק החזיר קריאת כלים לא תקינה","invalid_tool_response");}
+    }
+    private async Task<string> ExecuteAsync(string name,JsonNode schema,string instructions,string text,AiDocument? document,CancellationToken ct,IReadOnlyList<AiTool>? tools=null,IReadOnlyList<AiToolMessage>? messages=null)
     {
         ConfigurationValidator.ValidateAi(profile);
         var breaker=health??new AiKeyHealth();
@@ -82,7 +88,7 @@ public sealed class ConfiguredCompletionClient(AiProfile profile,SecretVault vau
             JsonNode? usageBody=null;Exception? failure=null;
             try
             {
-                var result=await SendAsync(name,schema,instructions,text,body=>usageBody=body,document,key,deadline.Token);
+                var result=await SendAsync(name,schema,instructions,text,body=>usageBody=body,document,key,deadline.Token,tools,messages);
                 if(!temporary)breaker.Success(profile,slot.KeyReference);return result;
             }
             catch(AiProviderException error)when(error.CanFailOver)
@@ -96,10 +102,11 @@ public sealed class ConfiguredCompletionClient(AiProfile profile,SecretVault vau
         if(last is not null)throw last;
         throw new AiUnavailableException("אין מפתח AI זמין כרגע. המפתחות חסרים, מושבתים או בהמתנה לאחר תקלה. אפשר לנסות מאוחר יותר או לבדוק מפתח מסוים בנפרד בניהול.","key_unavailable");
     }
-    private async Task<string> SendAsync(string name,JsonNode schema,string instructions,string text,Action<JsonNode?> observe,AiDocument? document,string key,CancellationToken ct)
+    private async Task<string> SendAsync(string name,JsonNode schema,string instructions,string text,Action<JsonNode?> observe,AiDocument? document,string key,CancellationToken ct,IReadOnlyList<AiTool>? tools=null,IReadOnlyList<AiToolMessage>? messages=null)
     {
         using var client=clients.CreateClient(profile.CustomProvider?"AiCustomProviders":"AiProviders");
         client.BaseAddress=new Uri(profile.BaseUrl.TrimEnd('/')+"/");client.Timeout=TimeSpan.FromSeconds(profile.TimeoutSeconds);
+        if(tools is not null)return await NativeTools.SendAsync(client,profile,key,instructions,tools,messages!,observe,ct);
         if(profile.Provider is "openai" or "compatible")
         {
             client.DefaultRequestHeaders.Authorization=new AuthenticationHeaderValue("Bearer",key);

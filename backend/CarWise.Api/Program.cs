@@ -141,6 +141,12 @@ builder.Services.AddScoped<IResponseNarrationService>(sp=>{
 });
 builder.Services.AddSingleton(new AccessControl(SupabaseClient(),demo));
 builder.Services.AddSingleton(new AuthAccounts(SupabaseClient(),database,state));
+builder.Services.AddScoped<AdvisorToolConversation>(sp=>{
+    var ai=sp.GetRequiredService<ConfigurationSnapshot>().Document.Configuration.Ai;
+    if(!ai.Enabled)return null!;
+    var client=new ConfiguredCompletionClient(ai.ProfileFor("extraction"),sp.GetRequiredService<SecretVault>(),sp.GetRequiredService<IHttpClientFactory>(),accounting:sp.GetRequiredService<UsageAccounting>(),health:sp.GetRequiredService<AiKeyHealth>());
+    return new(client,sp.GetRequiredService<ReferenceData>(),sp.GetRequiredService<PayrollEngine>(),sp.GetRequiredService<Repository>(),sp.GetRequiredService<ILogger<AdvisorToolConversation>>(),ai.ExtractionPrompt,sp.GetRequiredService<FleetService>(),sp.GetRequiredService<IResponseNarrationService>());
+});
 builder.Services.AddScoped<AdvisorService>();
 builder.Services.AddRateLimiter(options=>{
     options.RejectionStatusCode=429;

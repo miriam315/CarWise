@@ -3,8 +3,9 @@ using CarWise.Api.Infrastructure;
 namespace CarWise.Api.Domain;
 
 public sealed class AdvisorService(ReferenceData data,PayrollEngine engine,Repository repository,
-    IDataExtractionService extraction,IResponseNarrationService narration,AdvisorTiming? timing=null,FleetService? fleet=null,ILogger<AdvisorService>? logger=null)
+    IDataExtractionService extraction,IResponseNarrationService narration,AdvisorTiming? timing=null,FleetService? fleet=null,ILogger<AdvisorService>? logger=null,AdvisorToolConversation? tools=null)
 {
+    private bool suppressMessages;
     private readonly AdvisorTiming limits=(timing??AdvisorTiming.Default).Validate();
     private static readonly Dictionary<string,string> Aliases=new(){["אטו"]="CAR-10",["atto"]="CAR-10",["קרניבל"]="CAR-19",
         ["טסלה"]="CAR-14",["אוקטביה"]="CAR-15",["טוסון"]="CAR-12",["דולפין"]="CAR-03",["נירו"]="CAR-05",
@@ -32,7 +33,7 @@ public sealed class AdvisorService(ReferenceData data,PayrollEngine engine,Repos
         {return new{reply="הבקשה לא הושלמה בזמן. לא מוצג חישוב סופי. הנתונים שכבר נשמרו זמינים להמשך; נסו שוב או בחרו חלופה מהקטלוג.",target=(string?)null,candidates=Array.Empty<string>(),employee=(Employee?)null,mode=extraction.Mode,status="timeout",complete=false};}
         finally{if(acquired)gate.Release();}
     }
-    private async Task<object> ChatCoreAsync(ChatRequest request,CancellationToken ct,bool canChangeOccupation)
+    private async Task<object> ChatCoreAsync(ChatRequest request,CancellationToken ct,bool canChangeOccupation,bool useTools=true,ExtractedData? suppliedFields=null)
     {
         var text=request.Text?.Trim()??"";
         if(text.Length is 0 or >2000)throw new ArgumentException("כתבו שאלה עד 2,000 תווים");
@@ -42,13 +43,30 @@ public sealed class AdvisorService(ReferenceData data,PayrollEngine engine,Repos
         var e=engine.Validate(profile);
         e=await RefreshKnownParticipationAsync(e,ct);
         var state=e.AdvisorState??new AdvisorState();
+        var toolUnavailable=false;
+        if(useTools&&tools is not null&&request.Target is null)
+        {
+            try
+            {
+                var history=await repository.HistoryAsync(e.Id,ct);
+                var result=await tools.RunAsync(request,e,history,async(next,fields,token)=>
+                {
+                    suppressMessages=true;
+                    try{return System.Text.Json.Nodes.JsonNode.Parse(JsonDefaults.Serialize(await ChatCoreAsync(next,token,canChangeOccupation,false,fields)))!;}
+                    finally{suppressMessages=false;}
+                },ct);
+                var nextState=(result.Employee.AdvisorState??state) with{CandidateIds=result.Candidates};
+                return await ReplyAsync(result.Employee,nextState,text,result.Reply,result.Candidates.ToList(),ct);
+            }
+            catch(AiUnavailableException){toolUnavailable=true;}
+        }
         if(fleet is not null&&fleet.Policy.Enabled&&fleet.Policy.ShowToEmployees&&fleet.Policy.SwapEnabled&&IntakeFields.Missing(e).Length==0&&FleetRules.Category(text,out var fleetCategory))
             return await ReplyAsync(e,state,text,await fleet.Advice(e,fleetCategory,ct),[],ct);
         if(state.Target is not null&&state.Target!="waiver"&&!data.Cars.Any(car=>car.Id==state.Target))state=state with{Target=null};
         // A saved question, rather than model memory or a client's claimed context,
         // determines the meaning of a short numerical answer.
         var awaiting=state.AwaitingField;
-        ExtractedData fields=new();var answered=false;var aiFallback=false;
+        ExtractedData fields=suppliedFields??new();var answered=false;var aiFallback=false;
         if(awaiting is not null&&IntakeFields.All.Contains(awaiting)&&!IntakeFields.Known(e,awaiting))
         {
             if(IntakeFields.TryNumber(text,awaiting,out var number)){e=IntakeFields.Answer(e,awaiting,number);answered=true;}
@@ -68,9 +86,9 @@ public sealed class AdvisorService(ReferenceData data,PayrollEngine engine,Repos
             return await ReplyAsync(e,state,text,"הערך אינו תקין לשדה שנשאל. "+IntakeFields.Question(awaiting,data),[],ct);
         if(!answered&&request.Target is null)
         {
-            var history=await repository.HistoryAsync(e.Id,ct);
+            var history=suppliedFields is null?await repository.HistoryAsync(e.Id,ct):[];
             using var ai=CancellationTokenSource.CreateLinkedTokenSource(ct);ai.CancelAfter(limits.Extraction);
-            try{fields=await extraction.ExtractAsync(text,e,history,ai.Token).WaitAsync(ai.Token);}
+            try{fields=suppliedFields??(toolUnavailable?await new LocalExtractionService().ExtractAsync(text,e,[],ct):await extraction.ExtractAsync(text,e,history,ai.Token).WaitAsync(ai.Token));aiFallback=toolUnavailable;}
             catch(Exception error)when(!ct.IsCancellationRequested&&error is AiUnavailableException or HttpRequestException or OperationCanceledException)
             {
                 logger?.LogWarning("AI conversation extraction failed; local guidance used. Code={Code}, HTTP={Status}",
@@ -134,7 +152,7 @@ public sealed class AdvisorService(ReferenceData data,PayrollEngine engine,Repos
             var outsideHint=fields.RequestedModel??text;
             var ticketTarget=ParticipationRules.CatalogueTarget(outsideHint);
             e=e with{AdvisorState=new("catalogueVehicle",null,wantsElectric)};
-            await repository.CreateTicketAsync(e,ticketTarget,"בדיקת רכב שאינו בקטלוג: "+outsideHint+". נדרשים זיהוי רשמי, זכאות והשתתפות; אין לאשר חישוב לפני הוספת נתוני מקור.",ct);
+            await repository.CreateTicketAsync(e,ticketTarget,"בדיקת רכב שאינו בקטלוג: "+outsideHint+". נדרשים זיהוי רשמי, זכאות והשתתפות; אין לאשר חישוב לפני הוספת נתוני מקור.",ct,appendAnnouncement:!suppressMessages);
             return await ReplyAsync(e,e.AdvisorState,text,"לא נמצאה התאמה לרכב בקטלוג. העברתי שאלה לנציג; לא אנחש השתתפות או שווי שימוש ולא אציג נטו לרכב הזה. אחרי השלמת הקטלוג נוכל להמשיך בהשוואה.",[],ct);
         }
         if(target is not null&&data.Cars.Any(c=>c.Id==target))
@@ -165,7 +183,7 @@ public sealed class AdvisorService(ReferenceData data,PayrollEngine engine,Repos
                 await repository.CreateTicketAsync(e,target,DecisionMath.Question(engine,data,e,target),ct);
                 reply="חסר סכום השתתפות מאושר. שלחתי שאלה לנציג התחבורה. החלופה ממתינה לאישור; לא מוצג נטו סופי לרכב הזה. "+DecisionMath.Boundary(engine,data,e,target).Explanation;
             }
-            else reply=await NarrateAsync(result,ct);
+            else reply=!useTools?FinancialText.Template(result):await NarrateAsync(result,ct);
         }
         else if(candidates.Count>0)reply="כדי לזהות את הרכב לפי המפתח הרשמי, בחרו את הדגם המדויק מהרשימה. שם מסחרי לבדו לא מספיק.";
         else if(wantsElectric)
@@ -193,7 +211,7 @@ public sealed class AdvisorService(ReferenceData data,PayrollEngine engine,Repos
         if(aiFallback)reply="כדי לוודא שהפרטים נקלטו נכון, בדקו אותם לפני המשך ההשוואה.\n"+reply;
         employee=employee with{AdvisorState=state};
         await repository.SaveConversationAsync(employee,state.Target,ct);
-        await repository.AddMessageAsync(employee.Id,"user",text,ct);await repository.AddMessageAsync(employee.Id,"assistant",reply,ct);
+        if(!suppressMessages){await repository.AddMessageAsync(employee.Id,"user",text,ct);await repository.AddMessageAsync(employee.Id,"assistant",reply,ct);}
         return new{reply,target=state.Target,candidates,employee,mode=aiFallback?"guided-local":extraction.Mode,awaitingField=state.AwaitingField,missingFields=IntakeFields.Missing(employee),complete=IntakeFields.Missing(employee).Length==0&&state.AwaitingField is null};
     }
 }

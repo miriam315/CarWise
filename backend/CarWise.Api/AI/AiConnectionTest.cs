@@ -24,6 +24,19 @@ public static class AiConnectionTest
             var client=new ConfiguredCompletionClient(request.Profile,vault,clients,
                 string.IsNullOrWhiteSpace(request.ApiKey)?null:request.ApiKey.Trim(),accounting,
                 request.KeyId is null?health:new AiKeyHealth(),selected,request.ApiKeys);
+            if(request.ToolCalling)
+            {
+                var tool=new AiTool("carwise_connection_probe","A harmless synthetic connection test; echo the supplied nonce.",JsonNode.Parse("""{"type":"object","additionalProperties":false,"properties":{"nonce":{"type":"string","enum":["carwise"]}},"required":["nonce"]}""")!.AsObject());
+                var messages=new List<AiToolMessage>{new("user","Call carwise_connection_probe with nonce carwise. After its successful result, respond exactly CARWISE_TOOL_OK.")};
+                var turn=await client.CallToolsAsync("This is a synthetic native tool compatibility test. Use the provided function before responding. No personal data.",[tool],messages,ct);
+                if(turn.Calls.Count!=1||turn.Calls[0].Name!=tool.Name||turn.Calls[0].Arguments.Count!=1||turn.Calls[0].Arguments["nonce"]?.ToString()!="carwise")
+                    return new(false,"invalid_tool_response","המודל לא ביצע את קריאת הכלי הנדרשת. בדקו תמיכה ב־Tool Calling בפורמט ובמודל שנבחרו.");
+                var call=turn.Calls[0];messages.Add(new("assistant",Native:turn.Native));
+                messages.Add(new("tool",Native:call.HasNativeId?new JsonObject{["id"]=call.Id}:null,CallId:call.Id,Name:call.Name,Result:new(){["ok"]=true}));
+                var final=await client.CallToolsAsync("After the successful tool result respond exactly CARWISE_TOOL_OK.",[tool],messages,ct);
+                var passed=final.Calls.Count==0&&final.Text.Trim()=="CARWISE_TOOL_OK";
+                return new(passed,passed?"tools_ok":"invalid_tool_response",passed?"קריאת כלי, החזרת תוצאה והמשך תשובת המודל עברו בהצלחה":"המודל לא השלים תשובה לאחר קבלת תוצאת הכלי.");
+            }
             var schema=JsonNode.Parse("""{"type":"object","additionalProperties":false,"properties":{"ok":{"type":"boolean"}},"required":["ok"]}""")!;
             var response=await client.CompleteAsync("connection_test",schema,
                 "Return exactly a JSON object with ok=true. Do not include personal data.","בדיקת חיבור",ct);

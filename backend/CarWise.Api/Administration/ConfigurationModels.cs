@@ -84,7 +84,7 @@ public static class ConfigurationChanges
 public sealed record SaveConfigurationRequest(long ExpectedRevision,ManagedConfiguration Configuration,string Note,
     Dictionary<string,string>? ApiKeys=null,Dictionary<string,Dictionary<string,string>>? BackupApiKeys=null);
 public sealed record RestoreConfigurationRequest(long ExpectedRevision,long Revision,string Note);
-public sealed record TestAiRequest(AiProfile Profile,string? ApiKey=null,string? KeyId=null,Dictionary<string,string>? ApiKeys=null);
+public sealed record TestAiRequest(AiProfile Profile,string? ApiKey=null,string? KeyId=null,Dictionary<string,string>? ApiKeys=null,bool ToolCalling=false);
 public sealed record ConfigurationSnapshot(ConfigurationDocument Document,ReferenceData Data);
 public sealed class ConfigurationConflictException : Exception;
 public sealed class ConfigurationState(ConfigurationSnapshot initial)
