@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parent.parent
 OUTPUT = ROOT / '.local' / 'test-results'
 OUTPUT.mkdir(parents=True, exist_ok=True)
 parser = argparse.ArgumentParser(description=__doc__)
-parser.add_argument('--suite', action='append', choices=['fleet', 'intent', 'innovations', 'car-media', 'judge-demo', 'payslip', 'workspace'])
+parser.add_argument('--suite', action='append', choices=['fleet', 'intent', 'innovations', 'car-media', 'judge-demo', 'payslip', 'workspace', 'ai-model'])
 parser.add_argument('--quick', action='store_true', help='OCR: test 2 documents instead of all 12')
 parser.add_argument('--video', action='store_true', help='Record judge rehearsal; requires Playwright ffmpeg')
 args = parser.parse_args()
@@ -42,14 +42,14 @@ results = []
 
 
 def load_suite(name):
-    filename = 'innovation-checks.py' if name == 'innovations' else name + '-checks.py'
+    filename = 'innovation-checks.py' if name == 'innovations' else 'ai-model-checks.py' if name == 'ai-model' else name + '-checks.py'
     spec = importlib.util.spec_from_file_location(name + '_checks', ROOT / 'scripts' / filename)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
-for suite in args.suite or ['fleet', 'intent', 'innovations', 'car-media', 'judge-demo', 'payslip', 'workspace']:
+for suite in args.suite or ['fleet', 'intent', 'innovations', 'car-media', 'judge-demo', 'payslip', 'workspace', 'ai-model']:
     dbname = 'carwise_e2e_' + uuid.uuid4().hex
     test_connection = re.sub(r'(?i)((?:^|;)\s*Database\s*=\s*)[^;]+', lambda m: m[1] + dbname, connection)
     subprocess.run(['docker', 'exec', container, 'createdb', '-U', db_user, dbname], check=True)
@@ -132,7 +132,9 @@ for suite in args.suite or ['fleet', 'intent', 'innovations', 'car-media', 'judg
 
                 module = load_suite(suite)
                 try:
-                    if suite == 'innovations':
+                    if suite == 'ai-model':
+                        module.check(page, query, nav, OUTPUT)
+                    elif suite == 'innovations':
                         module.check(page, query, nav, OUTPUT, all_browser_files=not args.quick)
                     else:
                         module.check(query, page, nav, OUTPUT)

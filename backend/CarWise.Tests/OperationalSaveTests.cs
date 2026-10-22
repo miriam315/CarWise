@@ -43,6 +43,44 @@ public sealed class OperationalSaveTests
         Assert.Equal(2,restored.PolicyVersion);Assert.Equal(250,restored.Configuration.Rules["electric"]!["netBonus"]!.GetValue<int>());
         Assert.Contains(restored.Configuration.Employees,e=>e.Id==added.Id&&e.Name=="Updated operational name");Assert.Single(restored.Configuration.Cars[0].Photos);
     }
+    [Fact] public async Task AiModelsKeysPromptsAndPricesSaveWithoutPolicyVersionsAndRefreshAcrossServers()
+    {
+        var (service,db,vault,initial)=Setup();var config=initial.Document.Configuration;
+        config=config with{Ai=config.Ai with{Enabled=true}};
+        var activated=await service.SaveAsync(new(0,config,"",new(){{"extraction","SYNTHETIC-FIRST-KEY"},{"narration","SYNTHETIC-FIRST-KEY"}}),"ai-admin",default);
+        Assert.Equal(0,activated.PolicyVersion);Assert.Empty(activated.History);Assert.True(Assert.Single(activated.Operations).AiChanged);
+        var updated=activated.Configuration with{Ai=activated.Configuration.Ai with{
+            Extraction=activated.Configuration.Ai.Extraction with{Model="gpt-4.1",TimeoutSeconds=60},
+            ExtractionPrompt="Synthetic updated prompt",
+            Pricing=[new("openai","api.openai.com","gpt-4.1",2,1,8,null,"Synthetic rates")]
+        }};
+        var changed=await service.SaveAsync(new(activated.Revision,updated,""),"ai-admin",default);
+        var rotated=await service.SaveAsync(new(changed.Revision,changed.Configuration,"",new(){{"extraction","SYNTHETIC-ROTATED-KEY"}}),"ai-admin",default);
+        Assert.Equal(0,rotated.PolicyVersion);Assert.Empty(rotated.History);Assert.Equal(3,rotated.Operations.Count);
+        Assert.All(rotated.Operations,op=>{Assert.True(op.AiChanged);Assert.Empty(op.EmployeeIds);Assert.Empty(op.CarIds);});
+        Assert.DoesNotContain("SYNTHETIC-ROTATED-KEY",JsonDefaults.Serialize(rotated));
+        Assert.DoesNotContain("keyReference",JsonDefaults.Serialize(rotated.Operations));
+        var second=new ConfigurationService(db,new(initial),new(Source),vault);await second.RefreshAsync(default);
+        Assert.Equal("gpt-4.1",second.State.Current.Document.Configuration.Ai.Extraction.Model);
+        Assert.Equal("Synthetic updated prompt",second.State.Current.Document.Configuration.Ai.ExtractionPrompt);
+        Assert.Equal("SYNTHETIC-ROTATED-KEY",await vault.ResolveAsync(second.State.Current.Document.Configuration.Ai.Extraction.KeyReference,default,"api.openai.com"));
+        await Assert.ThrowsAsync<ConfigurationConflictException>(()=>second.SaveAsync(new(changed.Revision,changed.Configuration,""),"stale-admin",default));
+    }
+    [Fact] public async Task PolicyRestorationKeepsCurrentAiAndMixedChangesStillRequireAReason()
+    {
+        var (service,_,_,initial)=Setup();var config=JsonDefaults.Read<ManagedConfiguration>(JsonDefaults.Serialize(initial.Document.Configuration));
+        config.Rules["electric"]!["netBonus"]=500;
+        config=config with{Ai=config.Ai with{Extraction=config.Ai.Extraction with{Model="gpt-4.1"}}};
+        await Assert.ThrowsAsync<ArgumentException>(()=>service.SaveAsync(new(0,config,""),"operator",default));
+        var changed=await service.SaveAsync(new(0,config,"electric policy"),"operator",default);
+        Assert.Equal(1,changed.PolicyVersion);Assert.Equal("gpt-4.1-mini",Assert.Single(changed.History).Configuration.Ai.Extraction.Model);
+        var updated=changed.Configuration with{Ai=changed.Configuration.Ai with{Extraction=changed.Configuration.Ai.Extraction with{Model="gpt-4.1-nano"}}};
+        var aiSaved=await service.SaveAsync(new(changed.Revision,updated,""),"operator",default);
+        Assert.Equal(1,aiSaved.PolicyVersion);Assert.Single(aiSaved.History);
+        var restored=await service.RestoreAsync(new(aiSaved.Revision,0,"restore policy"),"operator",default);
+        Assert.Equal(2,restored.PolicyVersion);Assert.Equal(250,restored.Configuration.Rules["electric"]!["netBonus"]!.GetValue<int>());
+        Assert.Equal("gpt-4.1-nano",restored.Configuration.Ai.Extraction.Model);
+    }
     [Fact] public async Task SavingWithoutAnyChangesCreatesNeitherVersionNorOperationalEvent()
     {
         var (service,db,_,initial)=Setup();var saved=await service.SaveAsync(new(0,initial.Document.Configuration,""),"operator",default);

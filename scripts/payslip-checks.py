@@ -99,9 +99,11 @@ def check(query,page,nav,screenshots):
     page.get_by_role('tab',name='פרומפטים ותלושים',exact=True).click()
     prompt='חלץ נתונים חודשיים בלבד — הנחיה סינתטית לבדיקת שמירה'
     page.get_by_label('הנחיות לחילוץ תלושים',exact=True).fill(prompt)
-    page.get_by_label('סיבת שינוי הגדרות',exact=True).fill('Synthetic payslip prompt UI persistence')
-    page.get_by_role('button',name='שמירה והפעלה',exact=True).click()
+    before_ai_save=query('/admin/configuration')
     expect(page.get_by_label('סיבת שינוי הגדרות',exact=True)).to_have_count(0)
+    page.get_by_role('button',name='שמירת הגדרות',exact=True).click()
+    expect(page.get_by_label('סיבת שינוי הגדרות',exact=True)).to_have_count(0)
+    assert query('/admin/configuration')['policyRevision']==before_ai_save['policyRevision']
     assert query('/admin/configuration')['configuration']['ai']['payslipPrompt']==prompt
     assert not errors,errors
     external=[r.url for r in requests if r.url.startswith('http') and not r.url.startswith(page.url.split('/')[0]+'//'+page.url.split('/')[2])]

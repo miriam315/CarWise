@@ -118,7 +118,8 @@ public sealed class ConfigurationService(IJsonDatabase database,ConfigurationSta
                 !JsonNode.DeepEquals(JsonNode.Parse(JsonDefaults.Serialize(current.Configuration.Employees.SingleOrDefault(e=>e.Id==id))),JsonNode.Parse(JsonDefaults.Serialize(config.Employees.SingleOrDefault(e=>e.Id==id))))).ToList();
             var carIds=current.Configuration.Cars.Select(c=>c.Id).Union(config.Cars.Select(c=>c.Id)).Where(id=>
                 !JsonNode.DeepEquals(JsonNode.Parse(JsonDefaults.Serialize(current.Configuration.Cars.SingleOrDefault(c=>c.Id==id)?.Photos??[])),JsonNode.Parse(JsonDefaults.Serialize(config.Cars.SingleOrDefault(c=>c.Id==id)?.Photos??[])))).ToList();
-            var operations=current.Operations.ToList();if(employeeIds.Count>0||carIds.Count>0)operations.Insert(0,new(now,actor,employeeIds,carIds));
+            var aiChanged=!JsonNode.DeepEquals(JsonNode.Parse(JsonDefaults.Serialize(current.Configuration.Ai)),JsonNode.Parse(JsonDefaults.Serialize(config.Ai)));
+            var operations=current.Operations.ToList();if(employeeIds.Count>0||carIds.Count>0||aiChanged)operations.Insert(0,new(now,actor,employeeIds,carIds){AiChanged=aiChanged});
             var next=new ConfigurationDocument(current.Revision+1,now,actor,request.Note?.Trim()??"",config,history)
             {
                 PolicyRevision=current.PolicyVersion+(policyChanged?1:0),
@@ -138,7 +139,7 @@ public sealed class ConfigurationService(IJsonDatabase database,ConfigurationSta
         await RefreshAsync(ct);var current=state.Current.Document;
         var previous=current.History.SingleOrDefault(h=>h.Revision==request.Revision)??throw new ArgumentException("הגרסה אינה בהיסטוריה הזמינה");
         var operational=current.Configuration;
-        var restored=previous.Configuration with{Employees=operational.Employees,Cars=previous.Configuration.Cars.Select(c=>c with{Photos=operational.Cars.SingleOrDefault(p=>p.Id==c.Id)?.Photos??[]}).ToList()};
+        var restored=previous.Configuration with{Ai=operational.Ai,Employees=operational.Employees,Cars=previous.Configuration.Cars.Select(c=>c with{Photos=operational.Cars.SingleOrDefault(p=>p.Id==c.Id)?.Photos??[]}).ToList()};
         return await SaveAsync(new(request.ExpectedRevision,restored,request.Note),actor,ct);
     }
 }

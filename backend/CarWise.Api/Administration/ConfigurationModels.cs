@@ -57,7 +57,10 @@ public sealed record ManagedConfiguration(JsonNode Rules,List<Car> Cars,List<Dic
     public IntentPolicy IntentAnalytics {get;init;}=new();
 }
 public sealed record ConfigurationVersion(long Revision,DateTimeOffset SavedAt,string Actor,string Note,ManagedConfiguration Configuration);
-public sealed record OperationalChange(DateTimeOffset At,string Actor,List<string> EmployeeIds,List<string> CarIds);
+public sealed record OperationalChange(DateTimeOffset At,string Actor,List<string> EmployeeIds,List<string> CarIds)
+{
+    public bool AiChanged {get;init;}
+}
 public sealed record ConfigurationDocument(long Revision,DateTimeOffset SavedAt,string Actor,string Note,
     ManagedConfiguration Configuration,List<ConfigurationVersion> History)
 {
@@ -70,7 +73,9 @@ public sealed record ConfigurationDocument(long Revision,DateTimeOffset SavedAt,
 }
 public static class ConfigurationChanges
 {
-    public static ManagedConfiguration Policy(ManagedConfiguration config)=>config with{Employees=[],Cars=config.Cars.Select(c=>c with{Photos=[]}).ToList()};
+    // Keep the legacy snapshot shape, but exclude operational AI settings from policy comparison/history.
+    // Restoring policy always merges the current AI configuration.
+    public static ManagedConfiguration Policy(ManagedConfiguration config)=>config with{Employees=[],Cars=config.Cars.Select(c=>c with{Photos=[]}).ToList(),Ai=new(false,new(),new())};
     public static bool PolicyChanged(ManagedConfiguration before,ManagedConfiguration after)=>!JsonNode.DeepEquals(
         JsonNode.Parse(JsonSerializer.Serialize(Policy(before))),JsonNode.Parse(JsonSerializer.Serialize(Policy(after))));
 }
