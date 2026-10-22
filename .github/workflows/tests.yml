@@ -42,7 +42,7 @@ jobs:
             sleep 1
           done
           exit 1
-      - name: Real API and browser tests (fleet, privacy, payroll decision features)
+      - name: Real API and browser tests (fleet, privacy, payroll, vehicle galleries)
         run: npm run test:e2e -- --quick
         env:
           CARWISE_TEST_CONNECTION: Host=127.0.0.1;Port=55432;Database=carwise;Username=carwise;Password=ci-test-only

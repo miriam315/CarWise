@@ -113,6 +113,10 @@ builder.Services.AddScoped(sp=>sp.GetRequiredService<ConfigurationState>().Curre
 builder.Services.AddScoped(sp=>sp.GetRequiredService<ConfigurationSnapshot>().Data);
 builder.Services.AddScoped<PayrollEngine>();
 builder.Services.AddSingleton(repository);builder.Services.AddSingleton(database);
+builder.Services.AddSingleton<CarImages>();
+builder.Services.AddHttpClient<CommonsCarPhotos>(client=>{
+    client.Timeout=TimeSpan.FromSeconds(20);client.DefaultRequestHeaders.UserAgent.ParseAdd("CarWise/1.0 (vehicle image import; https://github.com/miriam315/CarWise)");
+}).ConfigurePrimaryHttpMessageHandler(()=>new HttpClientHandler{AllowAutoRedirect=false});
 builder.Services.AddScoped<DecisionStore>();
 builder.Services.AddScoped<FleetStore>();
 builder.Services.AddScoped<FleetService>();
@@ -142,6 +146,7 @@ builder.Services.AddScoped<AdvisorService>();
 builder.Services.AddRateLimiter(options=>{
     options.RejectionStatusCode=429;
     options.AddPolicy("documents",context=>RateLimitPartition.GetFixedWindowLimiter(context.Items["caller"] is Caller caller?caller.UserId:context.Connection.RemoteIpAddress?.ToString()??"unknown",_=>new FixedWindowRateLimiterOptions{PermitLimit=5,Window=TimeSpan.FromMinutes(1),QueueLimit=0}));
+    options.AddPolicy("car-media",context=>RateLimitPartition.GetFixedWindowLimiter(context.Items["caller"] is Caller caller?caller.UserId:context.Connection.RemoteIpAddress?.ToString()??"unknown",_=>new FixedWindowRateLimiterOptions{PermitLimit=90,Window=TimeSpan.FromMinutes(1),QueueLimit=0}));
     options.AddPolicy("login",context=>RateLimitPartition.GetFixedWindowLimiter(context.Connection.RemoteIpAddress?.ToString()??"unknown",_=>new FixedWindowRateLimiterOptions{PermitLimit=8,Window=TimeSpan.FromMinutes(1),QueueLimit=0}));
     options.AddPolicy("intent",context=>RateLimitPartition.GetFixedWindowLimiter(context.Connection.RemoteIpAddress?.ToString()??"unknown",_=>new FixedWindowRateLimiterOptions{PermitLimit=12,Window=TimeSpan.FromMinutes(1),QueueLimit=0}));
 });
@@ -327,6 +332,14 @@ app.MapPost("/api/setup/admin",async(CreateAccount request,HttpContext context,A
     catch(ConfigurationConflictException){return Results.Conflict(new{error="הגדרת מנהל כבר מתבצעת. נסו שוב בעוד מספר דקות."});}
 }).WithMetadata(new Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute("login"));
 app.MapAdministration(repository.Provider,supabaseUrl,demo);
+// Vehicle marketing photos are public assets, never employee documents.
+app.MapGet("/media/cars/{id}.jpg",async(string id,CarImages images,HttpContext context,CancellationToken ct)=>{
+    var bytes=await images.ReadAsync(id,ct);
+    if(bytes is null)return Results.NotFound();
+    context.Response.Headers.CacheControl="public,max-age=31536000,immutable";
+    context.Response.Headers.ContentSecurityPolicy="default-src 'none'";
+    return Results.File(bytes,"image/jpeg");
+});
 app.MapPayslips();
 app.MapDecisionTools(AuthorizeEmployee);
 app.MapFleet();

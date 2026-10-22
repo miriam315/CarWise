@@ -16,6 +16,13 @@ public sealed class ConfigurationValidator(ReferenceData officialSource)
                 Fail("נדרשים קטלוג, עיסוקים ועובדים; הרשימות חורגות מהגודל המותר");
             if(config.Employees.Any(e=>string.IsNullOrWhiteSpace(e.Name)))Fail("יש להזין שם לכל פרופיל עובד לפני שמירה");
             Unique(config.Cars.Select(c=>c.Id),"מזהי רכב");Unique(config.Employees.Select(e=>e.Id),"מזהי עובד");
+            foreach(var car in config.Cars)
+            {
+                if(car.Photos is null || car.Photos.Count>60 || car.Photos.Any(p=>p is null || !CarImages.ValidId(p.Id??"") || p.View is not ("exterior" or "interior" or "spin") || p.Credit is null || p.Credit.Length>1000))
+                    Fail("גלריית רכב: עד 60 תמונות, מזהים תקינים וקרדיט עד 1,000 תווים.");
+                if(car.Photos!.Count(p=>p.View=="spin")>48 || car.Photos!.Select(p=>p.View+":"+p.Id).Distinct().Count()!=car.Photos!.Count)
+                    Fail("סדרת 360° מוגבלת ל־48 צילומים שונים; אין לשכפל תמונה באותה קבוצת תצוגה.");
+            }
             Unique(config.Occupations.Select(o=>o["occupation"].GetString()!),"עיסוקים");
             var rules=config.Rules;var groups=rules["groupOrder"]!.AsArray().Select(x=>x!.GetValue<string>()).ToList();
             if(groups.Count is <1 or >10)Fail("מספר קבוצות זכאות לא תקין");Unique(groups,"קבוצות זכאות");

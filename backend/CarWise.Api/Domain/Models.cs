@@ -29,10 +29,12 @@ public sealed record Employee
     public string CurrentModel { get; init; } = "";
     public string Question { get; init; } = "";
 }
+public sealed record CarPhoto(string Id, string View, string Credit = "");
 public sealed record Car(string Id, string Group, string Brand, string MakerCode, string Model,
     string ModelCode, string Description, int Year, string Drive, decimal Price, decimal Value,
     decimal Cost, [property:JsonRequired] decimal Participation)
 {
+    public List<CarPhoto> Photos { get; init; } = [];
     public bool ParticipationKnown {get;init;}=true;
     public decimal OfficialValue { get; init; }
     public string[] OfficialKey { get; init; } = [];

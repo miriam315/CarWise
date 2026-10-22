@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parent.parent
 OUTPUT = ROOT / '.local' / 'test-results'
 OUTPUT.mkdir(parents=True, exist_ok=True)
 parser = argparse.ArgumentParser(description=__doc__)
-parser.add_argument('--suite', action='append', choices=['fleet', 'intent', 'innovations'])
+parser.add_argument('--suite', action='append', choices=['fleet', 'intent', 'innovations', 'car-media'])
 parser.add_argument('--quick', action='store_true', help='OCR: test 2 documents instead of all 12')
 args = parser.parse_args()
 connection = os.environ.get('CARWISE_TEST_CONNECTION')
@@ -48,7 +48,7 @@ def load_suite(name):
     return module
 
 
-for suite in args.suite or ['fleet', 'intent', 'innovations']:
+for suite in args.suite or ['fleet', 'intent', 'innovations', 'car-media']:
     dbname = 'carwise_e2e_' + uuid.uuid4().hex
     test_connection = re.sub(r'(?i)((?:^|;)\s*Database\s*=\s*)[^;]+', lambda m: m[1] + dbname, connection)
     subprocess.run(['docker', 'exec', container, 'createdb', '-U', db_user, dbname], check=True)
@@ -138,14 +138,18 @@ for suite in args.suite or ['fleet', 'intent', 'innovations']:
                     page.screenshot(path=str(OUTPUT / (suite + '-failure.png')), full_page=True)
                     raise
                 browser.close()
-            if suite in ['fleet', 'intent']:
-                path = '/fleet/officer' if suite == 'fleet' else '/admin/intent/report'
+            if suite in ['fleet', 'intent', 'car-media']:
+                path = '/fleet/officer' if suite == 'fleet' else '/data' if suite == 'car-media' else '/admin/intent/report'
                 before = query(path)
                 stop()
                 process = launch()
                 after = query(path)
-                keys = ['revision', 'assignments', 'requests', 'proposals', 'audit'] if suite == 'fleet' else ['cohorts']
+                keys = ['revision', 'assignments', 'requests', 'proposals', 'audit'] if suite == 'fleet' else ['cars'] if suite == 'car-media' else ['cohorts']
                 assert all(before[key] == after[key] for key in keys), 'Saved state changed after restart'
+                if suite == 'car-media':
+                    photo=next(c for c in after['cars'] if c['id']=='CAR-01')['photos'][0]
+                    with urllib.request.urlopen(base+'/media/cars/'+photo['id']+'.jpg') as response:
+                        assert response.read().startswith(b'\xff\xd8')
             results.append({'suite': suite, 'passed': True, 'seconds': round(time.monotonic() - started, 2)})
             print('PASS:', suite, 'browser/API regression and persistence', flush=True)
         except BaseException as error:

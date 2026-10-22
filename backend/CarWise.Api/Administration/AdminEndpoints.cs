@@ -24,6 +24,16 @@ public static class AdminEndpoints
         group.MapPost("/accounts/{id}/password",async(string id,ResetAccountPassword request,AuthAccounts accounts,CancellationToken ct)=>{await accounts.ResetAsync(id,request.Password,ct);return new{saved=true};})
             .WithMetadata(new Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute("login"));
         group.MapGet("/configuration",(ConfigurationService settings,CancellationToken ct)=>settings.ViewAsync(ct));
+        group.MapGet("/car-images/commons",(string q,CommonsCarPhotos commons,CancellationToken ct)=>commons.SearchAsync(q,ct))
+            .WithMetadata(new Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute("car-media"));
+        group.MapGet("/car-images/commons/{pageId:int}",async(int pageId,CommonsCarPhotos commons,CancellationToken ct)=>{
+            var image=await commons.DownloadAsync(pageId,ct);return Results.File(image.Bytes,image.Mime);
+        }).WithMetadata(new Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute("car-media"));
+        group.MapPost("/car-images",async(HttpContext context,CarImages images,CancellationToken ct)=>{
+            if(context.Request.Query["rightsConfirmed"]!="true")throw new ArgumentException("יש לאשר הרשאת שימוש בתמונות לפני העלאה.");
+            var bytes=await UploadReader.ReadAsync(context,CarImages.MaxBytes,ct);
+            return new{id=await images.SaveAsync(bytes,Actor(context),ct)};
+        }).WithMetadata(new Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute("car-media"));
         group.MapPost("/configuration",async(SaveConfigurationRequest request,ConfigurationService settings,HttpContext context,CancellationToken ct)=>{
             await settings.SaveAsync(request,Actor(context),ct);return await settings.ViewAsync(ct);
         });

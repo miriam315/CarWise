@@ -1,0 +1,37 @@
+{
+  "date": "2026-10-22",
+  "serverTests": {
+    "passed": 294,
+    "failed": 0,
+    "skipped": 3,
+    "newCarMediaAndCommonsCases": 21
+  },
+  "buildPassed": true,
+  "browserAndDatabaseSuites": [
+    {
+      "suite": "fleet",
+      "passed": true,
+      "seconds": 9.24
+    },
+    {
+      "suite": "intent",
+      "passed": true,
+      "seconds": 10.21
+    },
+    {
+      "suite": "innovations",
+      "passed": true,
+      "seconds": 36.0
+    },
+    {
+      "suite": "car-media",
+      "passed": true,
+      "seconds": 10.4
+    }
+  ],
+  "realPhotosSeeded": false,
+  "externalSourceStatus": "Wikimedia and Unsplash returned HTTP 403 from this execution environment, including after network permission was granted.",
+  "commonsVerification": "License validation, download restrictions and failures tested with controlled HTTP responses; picker and import tested with synthetic fixtures. No live Commons download verified.",
+  "storage": "Public vehicle media stored as content-addressed JPEGs in carwise_rules; references/credit in versioned car configuration.",
+  "spin": "Requires at least 12 distinct supplied frames; no generated or duplicated vehicle imagery shipped."
+}
