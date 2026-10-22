@@ -49,9 +49,19 @@ public sealed class AdvisorOperations(ReferenceData data,PayrollEngine engine,Re
         employee=await RefreshPersonalAsync(employee,ct);
         var flow=new AdvisorWorkflow(employee.AdvisorState);flow.Applied("current_car_updated");return await ContinueAsync(flow.Attach(engine.Validate(employee)),ct);
     }
+    public AdvisorActionResult AskAlternativeParticipation(Employee employee,string target,bool offerOnly=false)
+    {
+        var car=data.Cars.SingleOrDefault(car=>car.Id==target)??throw new ArgumentException("Unknown vehicle");
+        if(target==employee.CurrentCar||!engine.Eligibility(employee,car).Eligible)throw new ArgumentException("Eligible alternative required");
+        var flow=new AdvisorWorkflow(employee.AdvisorState);flow.AskAlternativeParticipation(target);
+        var reply=offerOnly?"אפשר לברר את הסכום עם נציג. לפתוח פנייה?":$"מה סכום ההשתתפות החודשי שסוכם עבור {car.Model}? אם הסכום עדיין לא ידוע, אפשר לברר עם נציג.";
+        return Result(employee,flow,reply,"needs_input",details:new{target,field="alternativeParticipation",net=(decimal?)null,delta=(decimal?)null});
+    }
     public async Task<AdvisorActionResult> CompareAsync(Employee employee,string target,CancellationToken ct)
     {
         if(target!="waiver"&&!data.Cars.Any(car=>car.Id==target))throw new ArgumentException("Unknown vehicle");
+        if(employee.AdvisorState is {AwaitingField:"alternativeParticipation",Target:{} unresolved}&&unresolved==target)
+            return AskAlternativeParticipation(employee,target);
         var flow=new AdvisorWorkflow(employee.AdvisorState);flow.Select(target);employee=flow.Attach(employee);
         if(IntakeFields.Missing(employee).Length>0)return await ContinueAsync(employee,ct);
         var (amounts,pending,sources)=await repository.ParticipationWithSourcesAsync(employee.Id,ct);
@@ -72,7 +82,7 @@ public sealed class AdvisorOperations(ReferenceData data,PayrollEngine engine,Re
     {
         if(target=="waiver"||target==employee.CurrentCar||!data.Cars.Any(car=>car.Id==target)||amount<0||amount>20000)throw new ArgumentException("Invalid alternative participation");
         await repository.ReportParticipationAsync(employee.Id,target,amount,ct);
-        var flow=new AdvisorWorkflow(employee.AdvisorState);flow.Applied("alternative_participation_reported");return await CompareAsync(flow.Attach(employee),target,ct);
+        var flow=new AdvisorWorkflow(employee.AdvisorState);flow.Select(target);flow.Applied("alternative_participation_reported");return await CompareAsync(flow.Attach(employee),target,ct);
     }
     public async Task<AdvisorActionResult> ApprovalAsync(Employee employee,string target,string question,CancellationToken ct)
     {
@@ -106,6 +116,8 @@ public sealed class AdvisorOperations(ReferenceData data,PayrollEngine engine,Re
         if(pending.Kind=="compare_waiver")return await CompareAsync(employee,"waiver",ct);
         if(pending.Kind=="compare_selected"&&pending.Target is {} selected)return await CompareAsync(employee,selected,ct);
         if(pending.Kind=="alternatives")return await BrowseAsync(employee,flow.State.RequestedCategory??"any",true,ct);
+        if(pending is {Kind:"representative",Subject:"alternative_participation",Target:{} alternative})
+            return await ApprovalAsync(employee,alternative,"הסכום שסוכם שונה מהקטלוג ונדרש בירור אישי",ct);
         if(pending.Kind=="representative")
         {
             var subject=pending.Subject=="catalogue_alternative"?(flow.State.RequestedCategory=="electric"?"בירור חלופה חשמלית נוספת לפי זכאות העובד":flow.State.RequestedCategory=="family"?"בירור חלופה נוספת במסלול המשפחתי לפי זכאות העובד":"בירור חלופת רכב נוספת לפי זכאות העובד"):

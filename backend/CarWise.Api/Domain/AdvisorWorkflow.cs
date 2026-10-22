@@ -4,7 +4,7 @@ public sealed record AdvisorPendingAction(string Kind,string? Target=null,string
 public sealed record AdvisorFrame(string? Category,string? Target,string[] Offered,string[] Rejected,string[] Preferences);
 public sealed record AdvisorTransition(long Sequence,string Action,string? Target=null,string? Field=null);
 public sealed record AdvisorMemory(long Revision=0,string Goal="none",string Phase="idle",AdvisorPendingAction? Pending=null,
-    string[]? Preferences=null,AdvisorFrame[]? Backstack=null,AdvisorTransition[]? Transitions=null);
+    string[]? Preferences=null,AdvisorFrame[]? Backstack=null,AdvisorTransition[]? Transitions=null,string[]? AskedFields=null);
 public enum AdvisorDirective { Answer, Continue, Browse, Compare, Clarify, Paused }
 
 /// <summary>One transition owner for the AI tools and deterministic adapters. Financial facts
@@ -58,8 +58,21 @@ public sealed class AdvisorWorkflow
     }
     public void Ask(string field)
     {
-        Change("ask_field",State with{AwaitingField=field,CandidateIds=[]},Memory with{Phase="collecting",Pending=null},field:field);
+        Change("ask_field",State with{AwaitingField=field,CandidateIds=[]},Memory with{Phase="collecting",Pending=null,AskedFields=[field]},field:field);
         Directive=AdvisorDirective.Continue;
+    }
+    public void AskGroup(string[] fields)
+    {
+        if(fields.Length==0||fields.Any(field=>!IntakeFields.All.Contains(field)))throw new ArgumentException("Missing payroll fields required");
+        Change("ask_group",State with{AwaitingField=fields[0],CandidateIds=[]},Memory with{Phase="collecting",Pending=null,AskedFields=fields});
+        Directive=AdvisorDirective.Answer;
+    }
+    public void AskAlternativeParticipation(string target)
+    {
+        if(State.Target!=target)Select(target);
+        Change("ask_alternative_participation",State with{Target=target,AwaitingField="alternativeParticipation",CandidateIds=[],OfferedReferral=null},
+            Memory with{Goal="compare",Phase="collecting",Pending=new("representative",Target:target,Subject:"alternative_participation")},target);
+        Directive=AdvisorDirective.Answer;
     }
     public void Wait(string field,string? target=null)
     {
@@ -128,7 +141,7 @@ public sealed class AdvisorWorkflow
     public Employee Attach(Employee employee)=>employee with{AdvisorState=State};
     public object Snapshot(Employee employee,ReferenceData data)=>new{Memory.Revision,Memory.Goal,Memory.Phase,Memory.Pending,
         category=State.RequestedCategory,target=State.Target,awaitingField=State.AwaitingField,
-        missingFields=IntakeFields.Missing(employee),knownFields=employee.KnownFields??IntakeFields.All,
+        askedFields=Memory.AskedFields??[],missingFields=IntakeFields.Missing(employee),knownFields=employee.KnownFields??IntakeFields.All,
         offered=(State.LastOfferedIds??State.CandidateIds??[]).Select(id=>data.Cars.FirstOrDefault(car=>car.Id==id)).Where(car=>car is not null).Select(car=>new{car!.Id,car.Model,car.Year}),
         rejected=State.RejectedCandidateIds??[],preferences=Memory.Preferences??[],previous=Memory.Backstack??[],recentActions=Memory.Transitions??[]};
     public static AdvisorState Reconcile(Employee employee,AdvisorState state,string[] candidates)

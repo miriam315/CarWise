@@ -66,7 +66,7 @@ public sealed class AdvisorService(ReferenceData data,PayrollEngine engine,Repos
         {
             workflow.Decline();e=workflow.Attach(e);return await ReplyAsync(e,workflow.State,text,"בסדר, לא אבצע את הפעולה שהצעתי.",[],ct);
         }
-        var numericAnswer=state.AwaitingField is {} savedField&&IntakeFields.All.Contains(savedField)&&!IntakeFields.Known(e,savedField)&&IntakeFields.IsNumericAnswer(text,savedField);
+        var numericAnswer=state.Memory?.AskedFields is not {Length:>1}&&state.AwaitingField is {} savedField&&IntakeFields.All.Contains(savedField)&&!IntakeFields.Known(e,savedField)&&IntakeFields.IsNumericAnswer(text,savedField);
         if(request.Target is null&&state.AwaitingField=="currentCar"&&!IntakeFields.Known(e,"currentCar")&&!AdvisorDialogue.RequestsComparison(text))
         {
             var namedCurrent=VehicleSearch.Find(text,data.Cars);
@@ -88,6 +88,16 @@ public sealed class AdvisorService(ReferenceData data,PayrollEngine engine,Repos
                 return await ReplyAsync(e,state with{Target=null,AwaitingField="vehicleSelection",CandidateIds=targets.Select(car=>car.Id).ToArray()},text,"מצאתי כמה דגמים או שנות רישום שמתאימים. איזה מהם רצית להשוות?",targets.Select(car=>car.Id).ToList(),ct);
         }
         var operations=new AdvisorOperations(data,engine,repository);
+        var alternativeTarget=state.Target??(workflow.Memory.Goal=="paused"?workflow.Memory.Backstack?.LastOrDefault()?.Target:null);
+        if(request.Target is null&&alternativeTarget is not null&&alternativeTarget!="waiver"&&alternativeTarget!=e.CurrentCar)
+        {
+            if(state.AwaitingField=="alternativeParticipation"&&IntakeFields.IsNumericAnswer(text,"participation")&&IntakeFields.TryAnswerNumber(text,"participation",out var personalAmount))
+                return await ReplyOperationAsync(await operations.ReportAsync(e,alternativeTarget,personalAmount,ct),text,ct);
+            if(state.AwaitingField=="alternativeParticipation"&&IntakeFields.IsUnknown(text))
+                return await ReplyOperationAsync(operations.AskAlternativeParticipation(e,alternativeTarget,true),text,ct);
+            if(AdvisorDialogue.PersonalContributionAgreement(text)&&!text.Contains("נוכחי",StringComparison.Ordinal)&&!System.Text.RegularExpressions.Regex.IsMatch(text,@"\d"))
+                return await ReplyOperationAsync(operations.AskAlternativeParticipation(e,alternativeTarget),text,ct);
+        }
         if(numericAnswer&&state.AwaitingField is {} numericField)
         {
             if(!IntakeFields.TryAnswerNumber(text,numericField,out var number))return await ReplyAsync(e,state,text,"הערך אינו תקין לשדה שנשאל. "+IntakeFields.Question(numericField,data),[],ct);
@@ -290,7 +300,7 @@ public sealed class AdvisorService(ReferenceData data,PayrollEngine engine,Repos
     {
         state=AdvisorWorkflow.Reconcile(employee,state,candidates.ToArray());
         if(aiFallback)reply="כדי לוודא שהפרטים נקלטו נכון, בדקו אותם לפני המשך ההשוואה.\n"+reply;
-        employee=employee with{AdvisorState=state};
+        employee=employee with{AdvisorState=state};reply=AdvisorLanguage.Neutral(reply);
         await repository.SaveConversationAsync(employee,state.Target,ct);
         await repository.AddMessageAsync(employee.Id,"user",text,ct);await repository.AddMessageAsync(employee.Id,"assistant",reply,ct);
         return new{reply,target=state.Target,candidates,employee,status=status??state.Memory?.Phase,mode=aiFallback?"guided-local":extraction.Mode,awaitingField=state.AwaitingField,missingFields=IntakeFields.Missing(employee),complete=IntakeFields.Missing(employee).Length==0&&state.AwaitingField is null&&state.Memory?.Pending is null};

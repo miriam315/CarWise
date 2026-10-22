@@ -8,6 +8,12 @@ Each tool returns a structured status and a fresh workflow snapshot. Unknown inf
 
 The workflow is stored in existing employee JSON; old snapshots migrate on read. Memory holds at most eight prior options and 24 action transitions, without copying payroll values or calculated net amounts. New chat clears it while retaining approved profile inputs and existing tickets.
 
+## Conversational pacing and personal agreements
+
+A report that a lower/different personal contribution was agreed keeps the selected vehicle and asks for the actual monthly amount (`discuss_alternative_participation`). No guessed discount or final net is given while that amount is unresolved. An explicit amount is saved with employee provenance and recalculated; an unknown amount can be referred, on consent, to a vehicle-specific representative ticket. `pause` is validated against an explicit request to stop; a price clarification or a question about pausing cannot silently pause the workflow.
+
+Chat comparisons show the estimated monthly net, its change, and a short contribution source note. Calculation drivers remain available on request via `explain_comparison` and in the comparison screen. Native tools may ask a small related group of missing payroll inputs (`ask_payroll_group`); only supplied fields are saved. A lone number after a grouped question must be clarified rather than assigned to multiple components. Name-based gender guessing is avoided: generated narration uses neutral singular Hebrew, excludes repeated greetings, and falls back to concise verified text when validation fails.
+
 ## Verification
 
 `npm test` covers typed actions, persisted conversation journeys, policy detours, rejected offers, returning to previous options, missing inputs and actual representative tickets. Scripted model tests verify the contract and state transitions; they do not establish the quality of a live provider's language understanding.

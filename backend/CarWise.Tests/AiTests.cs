@@ -38,11 +38,11 @@ public sealed class AiTests
         Assert.False((await service.ExtractAsync("יש לי 5",e,[],default)).HasUpdates);
     }
     [Theory]
-    [InlineData("נטו {NET}, הפרש {DELTA}, שווי {VALUE}, השתתפות {PARTICIPATION}",true)]
+    [InlineData("נטו {NET}, הפרש {DELTA}",true)]
     [InlineData("נטו 999999",false)]
     [InlineData("{NET} {NET} {DELTA} {VALUE} {PARTICIPATION}",false)]
     [InlineData("{NET} {DELTA} {VALUE} {PARTICIPATION} {FAKE}",false)]
-    public void NumericalNarrationIsRejected(string text,bool valid)=>Assert.Equal(valid,AiNarrationService.ValidTemplate(text));
+    public void NumericalNarrationIsRejected(string text,bool valid)=>Assert.Equal(valid,AiNarrationService.ValidChatTemplate(text));
     [Fact] public async Task ModelCannotOverrideNetNumbers()
     {
         using var http=new HttpClient(new FakeHttp(_=>Completion(new{text="תקבלי 999999 ₪"}))){BaseAddress=new("https://example.invalid/v1/")};
@@ -62,7 +62,7 @@ public sealed class AiTests
             var body=JsonNode.Parse(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult())!;
             var model=body["model"]!.ToString();var operation=body["response_format"]!["json_schema"]!["name"]!.ToString();calls.Add((model,operation));
             return operation=="extract_employee_intent"?Completion(new ExtractedData{RequestedModel="ATTO 3"}):
-                Completion(new{text="השוואה מחושבת: {NET}; שינוי {DELTA}; שווי {VALUE}; השתתפות {PARTICIPATION}"});
+                Completion(new{text="השוואה מחושבת: {NET}; שינוי {DELTA}"});
         })){BaseAddress=new("https://example.invalid/v1/")};
         var advisor=new AdvisorService(Data,new(Data),new(new ConversationDatabase()),
             new AiExtractionService(new AiGateway(http,"SELECTED-INTENT")),

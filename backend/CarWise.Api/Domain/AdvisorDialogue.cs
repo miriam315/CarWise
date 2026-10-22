@@ -5,6 +5,12 @@ namespace CarWise.Api.Domain;
 public static class AdvisorDialogue
 {
     public static string? SocialReply(string text)=>Regex.IsMatch(text.Trim(),@"^(?:תודה(?: רבה| לך| רבה לך)?|מעולה(?: תודה)?|מצוין(?: תודה)?|אחלה(?: תודה)?|thanks|thank you)[!.\s🙏😊]*$",RegexOptions.IgnoreCase|RegexOptions.CultureInvariant,TimeSpan.FromMilliseconds(100))?"בשמחה! אני כאן אם תרצו לבדוק עוד משהו.":null;
+    // A navigation tool cannot discard an active goal without an explicit request to pause.
+    public static bool ExplicitPauseRequest(string text)=>Regex.IsMatch(text.Trim(),
+        @"^(?:(?:בואו?|בואי|אפשר|בבקשה)\s+)?(?:נעצור|נפסיק|עצור|עצרי|תעצור|תעצרי|להפסיק|לעצור|נניח לזה|נעזוב את זה)|^(?:אני )?(?:רוצה|מבקש|מבקשת) (?:לעצור|להפסיק)|^(?:נמשיך|אמשיך) (?:אחר כך|בהמשך|מחר)",RegexOptions.CultureInvariant,TimeSpan.FromMilliseconds(100));
+    public static bool PersonalContributionAgreement(string text)=>Regex.IsMatch(text,
+        @"השתתפות.{0,35}(?:נמוכ|נמוך|שונה|אחרת|אחר|פחות)|(?:סיכמו|סכמו|סוכם|סיכמנו|דיברו|הסכם|סיכום).{0,60}השתתפות",
+        RegexOptions.CultureInvariant,TimeSpan.FromMilliseconds(100));
     public static bool AcceptsReferral(string text)=>Regex.IsMatch(text,@"^(?:כן(?: בבקשה)?|כן,? (?:תפתח|תפתחי|שלח|שלחי)(?: פנייה| פניה)?|בבקשה)[.!]?$",RegexOptions.CultureInvariant,TimeSpan.FromMilliseconds(100));
     public static bool WantsDifferent(string text)=>Regex.IsMatch(text,@"(?:רכב|דגם|אפשרות|חלופה)\s+(?:חשמלי\s+)?אחר|(?:עוד|נוספ).{0,12}(?:רכב|דגם|אפשרות|חלופה)",RegexOptions.CultureInvariant,TimeSpan.FromMilliseconds(100));
     public static bool AsksMissing(string text)=>Regex.IsMatch(text,@"(?:יש|האם|אילו|איזה|מה).{0,30}(?:נתונ|פרט|משהו).{0,20}(?:חסר|להשלים)|(?:אילו|איזה|מה).{0,15}חסר|חסר.{0,15}(?:משהו|נתונ|פרט)",RegexOptions.CultureInvariant,TimeSpan.FromMilliseconds(100));
