@@ -93,4 +93,91 @@ public sealed class AdvisorDialogueTests
         public Task<string> NarrateAsync(Alternative a,CancellationToken ct)=>throw new Xunit.Sdk.XunitException("Intake must not narrate a calculation");
         public Task<string> ExplainFactsAsync(string[] facts,CancellationToken ct)=>throw new Xunit.Sdk.XunitException("Intake must not narrate a dump of tool facts");
     }
+    [Fact] public async Task ModelCanAskANaturalGroundedQuestionInOneRound()
+    {
+        var employee=Data.Employees[0] with{KnownFields=[]};
+        var client=new ScriptedToolClient(_=>new AiToolTurn([
+            new("start","start_comparison",new(){["category"]="electric"}),
+            new("question","ask_next_question",new(){["field"]="salary",["question"]="כדי לבדוק את המעבר, מה שכר הבסיס שלך בחודש?"})],"",new JsonObject()));
+        var result=await Chat(Service(new(),client,new NoNarrationDuringIntake()),employee,"אני שוקלת לעבור לרכב חשמלי");
+        Assert.Equal("כדי לבדוק את המעבר, מה שכר הבסיס שלך בחודש?",result["reply"]!.ToString());Assert.Equal(1,client.Calls);
+        Assert.Equal("salary",result["awaitingField"]!.ToString());Assert.False(IntakeFields.Known(JsonDefaults.Read<Employee>(result["employee"]!.ToJsonString()),"salary"));
+    }
+    [Fact] public async Task OneModelRoundCanSaveSeveralAnswersAndAskTheNextActualQuestion()
+    {
+        var employee=Data.Employees[0] with{KnownFields=["salary","commission","bonus","pension"],AdvisorState=new("fund",null,true,RequestedCategory:"electric")};
+        var db=new ConversationDatabase();await new Repository(db).SaveConversationAsync(employee,null,default);
+        var client=new ScriptedToolClient(_=>new AiToolTurn([
+            new("save","set_payroll_fields",new(){["fields"]=new JsonObject{["salary"]=null,["commission"]=null,["bonus"]=null,["pension"]=null,["fund"]=2.5m,["credits"]=2.75m,["children"]=null}}),
+            new("question","ask_next_question",new(){["field"]="children",["question"]="וכמה ילדים עד גיל {CHILD_AGE} יש לך?"})],"",new JsonObject()));
+        var result=await Chat(Service(db,client,new NoNarrationDuringIntake()),employee,"2.5 ויש לי 2.75 נקודות זיכוי");
+        Assert.Equal(1,client.Calls);Assert.Equal(2.5m,result["employee"]!["fund"]!.GetValue<decimal>());Assert.Equal(2.75m,result["employee"]!["credits"]!.GetValue<decimal>());
+        Assert.Equal("children",result["awaitingField"]!.ToString());Assert.DoesNotContain("0",result["reply"]!.ToString());Assert.Contains("23",result["reply"]!.ToString());
+    }
+    [Theory][InlineData("salary","מה השכר שלך, נניח 18000?")][InlineData("salary","מה העמלות שלך?")]
+    [InlineData("children","כמה ילדים יש לך?")][InlineData("pension","מה סכום הפנסיה שלך?")]
+    public void QuestionsCannotIntroduceAmountsSkipSubjectsOrLoseRequiredUnits(string field,string question)=>Assert.False(AdvisorDialogue.ValidQuestion(question,field));
+    [Theory][InlineData("אין", "commission")][InlineData("אין לי בונוס", "bonus")][InlineData("לא", "fund")][InlineData("אין ילדים", "children")]
+    public async Task ExplicitNoneAnswersNeedNeitherAZeroInstructionNorAModelCall(string answer,string field)
+    {
+        var employee=Data.Employees[0] with{KnownFields=[..IntakeFields.All.Where(f=>f!=field)],AdvisorState=new(field,null,true,RequestedCategory:"electric")};
+        var db=new ConversationDatabase();await new Repository(db).SaveConversationAsync(employee,null,default);var client=new ScriptedToolClient();
+        var result=await Chat(Service(db,client),employee,answer);
+        Assert.Equal(0,client.Calls);Assert.Empty(result["missingFields"]!.AsArray());
+        Assert.DoesNotContain("כתבו 0",result["reply"]!.ToString());
+    }
+    [Theory][InlineData("לא יודע")][InlineData("אין לי מושג")][InlineData("אין לי בונוס")]
+    public void UnknownOrDifferentComponentCannotBecomeZeroCommission(string text)=>Assert.False(IntakeFields.TryAnswerNumber(text,"commission",out _));
+    [Fact] public async Task SeveralExplicitAbsentComponentsAreAcceptedButUnknownFieldsAreNotZeroed()
+    {
+        Assert.True(IntakeFields.ExplicitNoneStatement("אין לי עמלות וגם אין לי בונוס","commission"));
+        Assert.True(IntakeFields.ExplicitNoneStatement("אין לי עמלות וגם אין לי בונוס","bonus"));
+        Assert.True(AdvisorDialogue.ValidQuestion("כמה אחוזים מהשכר מופרשים לפנסיה בחלק שלך?","pension"));
+        var employee=Data.Employees[0] with{KnownFields=["salary"],AdvisorState=new("commission",null,true,RequestedCategory:"electric")};
+        var db=new ConversationDatabase();await new Repository(db).SaveConversationAsync(employee,null,default);
+        var client=new ScriptedToolClient(_=>new AiToolTurn([
+            new("save","set_payroll_fields",new(){["fields"]=new JsonObject{["salary"]=null,["commission"]=0m,["bonus"]=0m,["pension"]=null,["fund"]=null,["credits"]=null,["children"]=null}}),
+            new("question","ask_next_question",new(){["field"]="pension",["question"]="כמה אחוזים מהשכר מופרשים לפנסיה בחלק שלך?"})],"",new JsonObject()));
+        var result=await Chat(Service(db,client,new NoNarrationDuringIntake()),employee,"אין לי עמלות וגם אין לי בונוס");
+        var saved=JsonDefaults.Read<Employee>(result["employee"]!.ToJsonString());Assert.True(IntakeFields.Known(saved,"commission"));Assert.True(IntakeFields.Known(saved,"bonus"));Assert.False(IntakeFields.Known(saved,"fund"));Assert.Equal("pension",result["awaitingField"]!.ToString());Assert.Equal(1,client.Calls);
+    }
+    [Fact] public async Task ExhaustedElectricCatalogueExplainsTheLimitAndAcceptanceOpensARealReferral()
+    {
+        var employee=Data.Employees[0] with{Occupation="מפקח/ת איכות במפעל",AdvisorState=new(null,"CAR-03",true,["CAR-03"],"electric")};
+        var db=new ConversationDatabase();await new Repository(db).SaveConversationAsync(employee,"CAR-03",default);
+        var client=new ScriptedToolClient(_=>Call("list_alternatives",new(){["category"]="electric"}));
+        var result=await Chat(Service(db,client,new NoNarrationDuringIntake()),employee,"לבחור דגם אחר של רכב חשמלי");
+        Assert.Equal(1,client.Calls);Assert.Empty(result["candidates"]!.AsArray());Assert.Null(result["target"]);
+        Assert.Contains("אין כרגע רכב חשמלי נוסף",result["reply"]!.ToString());Assert.Contains("רוצה שאפתח פנייה לנציג",result["reply"]!.ToString());Assert.Empty(await new Repository(db).TicketsAsync(employee.Id));
+        result=await Chat(Service(db,new ScriptedToolClient()),employee,"כן בבקשה");
+        Assert.Contains("פתחתי פנייה",result["reply"]!.ToString());var ticket=Assert.Single(await new Repository(db).TicketsAsync(employee.Id));Assert.Contains("חשמלית",ticket.Question);Assert.Null(result["target"]);
+    }
+    [Fact] public async Task OtherElectricCarsAreFreshEligibleOptionsNotThePreviousNarrowSearch()
+    {
+        var employee=Data.Employees[0] with{AdvisorState=new(null,"CAR-03",true,["CAR-03"],"electric")};
+        var db=new ConversationDatabase();await new Repository(db).SaveConversationAsync(employee,"CAR-03",default);
+        var client=new ScriptedToolClient(_=>Call("list_alternatives",new(){["category"]="electric"}));
+        var result=await Chat(Service(db,client,new NoNarrationDuringIntake()),employee,"אני רוצה רכב אחר");
+        Assert.NotEmpty(result["candidates"]!.AsArray());Assert.DoesNotContain("CAR-03",result["candidates"]!.AsArray().Select(c=>c!.ToString()));
+        Assert.All(result["candidates"]!.AsArray(),id=>{var car=Data.Cars.Single(c=>c.Id==id!.ToString());Assert.Equal("חשמלי",car.Drive);Assert.True(new PayrollEngine(Data).Eligibility(employee,car).Eligible);});
+        Assert.Null(result["target"]);Assert.Equal("electric",result["employee"]!["advisorState"]!["requestedCategory"]!.ToString());
+    }
+    [Fact] public async Task UnknownPayrollCanOfferARepresentativeAndYesPreservesTheMissingValue()
+    {
+        var employee=Data.Employees[0] with{KnownFields=[..IntakeFields.All.Where(f=>f!="salary")],AdvisorState=new("salary",null,true,RequestedCategory:"electric")};
+        var db=new ConversationDatabase();await new Repository(db).SaveConversationAsync(employee,null,default);
+        var client=new ScriptedToolClient(_=>Call("ask_next_question",new(){["field"]="salary",["question"]="רוצה שאברר את שכר הבסיס מול נציג?"}));
+        var result=await Chat(Service(db,client,new NoNarrationDuringIntake()),employee,"לא יודעת");
+        Assert.Contains("נציג",result["reply"]!.ToString());Assert.Empty(await new Repository(db).TicketsAsync(employee.Id));
+        result=await Chat(Service(db,new ScriptedToolClient()),employee,"כן");
+        var ticket=Assert.Single(await new Repository(db).TicketsAsync(employee.Id));Assert.Contains("שכר הבסיס",ticket.Question);
+        Assert.Contains("פתחתי פנייה",result["reply"]!.ToString());Assert.Contains("salary",result["missingFields"]!.AsArray().Select(f=>f!.ToString()));Assert.False(result["complete"]!.GetValue<bool>());
+    }
+    [Fact] public async Task UnknownCurrentCarDoesNotTriggerRemoteParticipationLookupsOnEveryIntakeTurn()
+    {
+        var db=new ConversationDatabase();var employee=Data.Employees[0] with{KnownFields=[]};
+        var service=Service(db,new ScriptedToolClient());
+        var result=await service.RefreshKnownParticipationAsync(employee,default);
+        Assert.Equal(0,db.ReadCalls);Assert.False(IntakeFields.Known(result,"participation"));
+    }
 }

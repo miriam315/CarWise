@@ -14,7 +14,7 @@ public sealed class AdvisorService(ReferenceData data,PayrollEngine engine,Repos
     public async Task<Employee> RefreshKnownParticipationAsync(Employee employee,CancellationToken ct)
     {
         if(IntakeFields.Known(employee,"currentCar")&&employee.CurrentCar is null)return IntakeFields.Answer(employee,"participation",0);
-        if(IntakeFields.Known(employee,"participation")||employee.CurrentCar is null)return employee;
+        if(!IntakeFields.Known(employee,"currentCar")||IntakeFields.Known(employee,"participation")||employee.CurrentCar is null)return employee;
         var (approved,_,sources)=await repository.ParticipationWithSourcesAsync(employee.Id,ct);
         return sources.GetValueOrDefault(employee.CurrentCar)=="representative"&&approved.TryGetValue(employee.CurrentCar,out var amount)?IntakeFields.Answer(employee,"participation",amount):employee;
     }
@@ -44,6 +44,14 @@ public sealed class AdvisorService(ReferenceData data,PayrollEngine engine,Repos
         e=await RefreshKnownParticipationAsync(e,ct);
         var state=e.AdvisorState??new AdvisorState();
         if(AdvisorScope.ClearlyUnrelated(text))return await ReplyAsync(e,state,text,AdvisorScope.Redirect,[],ct);
+        if((state.AwaitingField=="alternativeCatalogue"||state.OfferedReferral is {} offered&&IntakeFields.Missing(e).Contains(offered))&&AdvisorDialogue.AcceptsReferral(text))
+        {
+            var alternative=state.AwaitingField=="alternativeCatalogue";
+            var subject=alternative?(state.RequestedCategory=="electric"?"בירור חלופה חשמלית נוספת לפי זכאות העובד":state.RequestedCategory=="family"?"בירור חלופה נוספת במסלול המשפחתי לפי זכאות העובד":"בירור חלופת רכב נוספת לפי זכאות העובד"):IntakeFields.Question(state.OfferedReferral!,data);
+            var ticketTarget=!alternative&&state.OfferedReferral=="participation"&&e.CurrentCar is {} car?car:ParticipationRules.CatalogueTarget(subject);
+            await repository.CreateTicketAsync(e,ticketTarget,subject+". העובד אישר פנייה לנציג; נדרשים נתוני מקור מאושרים לפני חישוב.",ct,appendAnnouncement:false);
+            return await ReplyAsync(e,state with{AwaitingField=alternative?null:state.AwaitingField,OfferedReferral=null},text,"פתחתי פנייה לנציג לבירור "+(alternative?"חלופה נוספת שמתאימה לזכאות שלך":"הנתון החסר")+". עד לקבלת נתונים מאושרים לא אציג חישוב נטו סופי.",[],ct);
+        }
         var numericAnswer=state.AwaitingField is {} savedField&&IntakeFields.All.Contains(savedField)&&!IntakeFields.Known(e,savedField)&&IntakeFields.IsNumericAnswer(text,savedField);
         var toolUnavailable=false;
         if(useTools&&tools is not null&&request.Target is null&&!numericAnswer)
@@ -64,6 +72,12 @@ public sealed class AdvisorService(ReferenceData data,PayrollEngine engine,Repos
         }
         if(fleet is not null&&fleet.Policy.Enabled&&fleet.Policy.ShowToEmployees&&fleet.Policy.SwapEnabled&&IntakeFields.Missing(e).Length==0&&FleetRules.Category(text,out var fleetCategory))
             return await ReplyAsync(e,state,text,await fleet.Advice(e,fleetCategory,ct),[],ct);
+        if(useTools&&IntakeFields.Missing(e).Length==0&&AdvisorDialogue.WantsDifferent(text))
+        {
+            var category=text.Contains("חשמל",StringComparison.Ordinal)?"electric":text.Contains("משפח",StringComparison.Ordinal)?"family":state.RequestedCategory??(state.WantsElectric?"electric":"any");
+            var (answer,choices)=AdvisorDialogue.Alternatives(e,data,engine,category,state.Target);
+            return await ReplyAsync(e,new(choices.Length==0?"alternativeCatalogue":null,null,category=="electric",choices,category),text,answer,choices.ToList(),ct,toolUnavailable);
+        }
         if(state.Target is not null&&state.Target!="waiver"&&!data.Cars.Any(car=>car.Id==state.Target))state=state with{Target=null};
         // A saved question, rather than model memory or a client's claimed context,
         // determines the meaning of a short numerical answer.

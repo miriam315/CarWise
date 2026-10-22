@@ -14,9 +14,11 @@ public sealed class ConversationDatabase:IJsonDatabase
     public List<JsonNode> Tickets {get;}=[];
     public List<(string Employee,string Role,string Text)> Messages {get;}=[];
     public TimeSpan ReadDelay {get;set;}
+    public int ReadCalls {get;private set;}
     public string Provider=>"conversation-test";
     public async Task<JsonArray> ReadAsync(string table,IReadOnlyDictionary<string,string>? filters=null,int offset=0,int limit=1000,CancellationToken ct=default,string? afterId=null)
     {
+        ReadCalls++;
         if(ReadDelay>TimeSpan.Zero)await Task.Delay(ReadDelay,ct);
         IEnumerable<JsonNode> rows=table switch{
             "carwise_conversations"=>Conversations.Values,

@@ -3,7 +3,7 @@ using System.Text.RegularExpressions;
 using CarWise.Api.AI;
 namespace CarWise.Api.Domain;
 
-public sealed record AdvisorState(string? AwaitingField=null,string? Target=null,bool WantsElectric=false,string[]? CandidateIds=null,string? RequestedCategory=null);
+public sealed record AdvisorState(string? AwaitingField=null,string? Target=null,bool WantsElectric=false,string[]? CandidateIds=null,string? RequestedCategory=null,string? OfferedReferral=null);
 public static class IntakeFields
 {
     public static readonly string[] All=["salary","commission","bonus","pension","fund","credits","children","currentCar","participation"];
@@ -24,14 +24,14 @@ public static class IntakeFields
     }
     public static string Question(string field,ReferenceData data)=>field switch{
         "salary"=>"מה שכר הבסיס החודשי שלך, לפני עמלות ובונוס?",
-        "commission"=>"מה סכום העמלות החודשי לחישוב? אם אין עמלות, כתבו 0.",
-        "bonus"=>"מה סכום הבונוס החודשי לחישוב? אם אין בונוס, כתבו 0.",
-        "pension"=>"מה אחוז הפרשת העובד לפנסיה? למשל 6. אין להזין את סכום הניכוי בשקלים.",
-        "fund"=>"מה אחוז הפרשת העובד לקרן השתלמות? אם אין, כתבו 0.",
-        "credits"=>"כמה נקודות זיכוי יש לך? למשל 2.25.",
-        "children"=>$"כמה ילדים עד גיל {data.Rules["familyTrack"]!["childMaxAge"]} יש לך? אם אין, כתבו 0.",
-        "currentCar"=>"איזה רכב יש לך היום? בחרו דגם ושנת רישום מדויקים מהרשימה. אם אין רכב חברה, כתבו ״ללא רכב״.",
-        "participation"=>"מה ההשתתפות החודשית שלך ברכב הנוכחי? אם אין השתתפות, כתבו 0; אם הסכום לא ידוע, כתבו ״לא יודע״ ואפנה לנציג.",
+        "commission"=>"מה לגבי עמלות מעבר לשכר הבסיס — יש לך, ובאיזה סכום חודשי?",
+        "bonus"=>"ומה לגבי בונוס — יש סכום חודשי שצריך להביא בחשבון?",
+        "pension"=>"כמה אחוזים מהשכר שלך מופרשים לפנסיה בחלק העובד?",
+        "fund"=>"יש לך קרן השתלמות, ומה אחוז ההפרשה שלך אליה?",
+        "credits"=>"כמה נקודות זיכוי מופיעות בתלוש שלך?",
+        "children"=>$"כמה ילדים עד גיל {data.Rules["familyTrack"]!["childMaxAge"]} יש לך?",
+        "currentCar"=>"איזה רכב חברה יש לך היום, אם בכלל — דגם ושנת רישום?",
+        "participation"=>"כמה מנכים לך בחודש על הרכב הנוכחי? אם הסכום לא ידוע, אפשר לברר עם נציג.",
         _=>throw new ArgumentException("Unknown intake field")};
     public static bool IsUnknown(string text)=>Regex.IsMatch(text,@"^(?:לא (?:יודע(?:ת)?|ידוע)|אין לי מושג|צריך(?:ה)? נציג)[.!?]?$",RegexOptions.CultureInvariant,TimeSpan.FromMilliseconds(100));
     private static string AnswerText(string text,string field)
@@ -45,10 +45,20 @@ public static class IntakeFields
         var match=Regex.Match(text.Trim(),@"^(?:ה)?"+label+@"(?:\s+שלי)?(?:\s+(?:הוא|היא|הן))?\s*[:=]?\s*(?<value>.+)$",RegexOptions.CultureInvariant,TimeSpan.FromMilliseconds(100));
         return match.Success?match.Groups["value"].Value:text.Trim();
     }
-    public static bool TryAnswerNumber(string text,string field,out decimal value)=>TryNumber(AnswerText(text,field),field,out value);
+    public static bool ExplicitNone(string text,string field,bool requireLabel=false)
+    {
+        var label=field switch{"commission"=>"עמלות","bonus"=>"בונוס","fund"=>"קרן השתלמות","children"=>"ילדים","participation"=>"השתתפות",_=>null};
+        if(label is null)return false;
+        var shortAnswer=requireLabel?"":"לא|אין|אין לי|ללא|";
+        return Regex.IsMatch(text.Trim(),@"^(?:"+shortAnswer+@"(?:אין(?: לי)?|ללא) "+label+@"|לא מקבל(?:ת)? "+label+@")[.!]?$",RegexOptions.CultureInvariant,TimeSpan.FromMilliseconds(100));
+    }
+    public static bool ExplicitNoneStatement(string text,string field)=>Regex.Split(text,@"[,;]|\s+(?:וגם\s+|ו(?=אין|לא|ללא))",RegexOptions.CultureInvariant,TimeSpan.FromMilliseconds(100)).Any(part=>ExplicitNone(part,field,true));
+    public static bool TryAnswerNumber(string text,string field,out decimal value)
+    {if(ExplicitNone(text,field)){value=0;return true;}return TryNumber(AnswerText(text,field),field,out value);}
     public static bool IsNumericAnswer(string text,string field)
     {
         if(field=="currentCar")return false;
+        if(ExplicitNone(text,field))return true;
         var value=AnswerText(text,field);
         return Regex.IsMatch(value,@"\d",RegexOptions.CultureInvariant,TimeSpan.FromMilliseconds(100))&&
             Regex.IsMatch(value,"""^[\d, .%₪ש״ח"'+\-]+$""",RegexOptions.CultureInvariant,TimeSpan.FromMilliseconds(100));
