@@ -58,6 +58,11 @@ public sealed class AdvisorService(ReferenceData data,PayrollEngine engine,Repos
         e=await RefreshKnownParticipationAsync(e,ct);
         var state=e.AdvisorState??new AdvisorState();
         if(AdvisorDialogue.SocialReply(text) is {} social)return await ReplyAsync(e,state with{CandidateIds=null},text,social,[],ct);
+        if(AdvisorDialogue.AsksMissing(text))
+        {
+            var missingStatus=IntakeFields.Missing(e);var answer=AdvisorDialogue.MissingStatus(e,data);
+            return await ReplyAsync(e,state with{CandidateIds=null,AwaitingField=missingStatus.FirstOrDefault()??state.AwaitingField,OfferedReferral=missingStatus.Length>0&&answer.Contains("נציג",StringComparison.Ordinal)?missingStatus[0]:null},text,answer,[],ct);
+        }
         if(AdvisorScope.ClearlyUnrelated(text))return await ReplyAsync(e,state,text,AdvisorScope.Redirect,[],ct);
         if((state.AwaitingField=="alternativeCatalogue"||state.OfferedReferral is {} offered&&IntakeFields.Missing(e).Contains(offered))&&AdvisorDialogue.AcceptsReferral(text))
         {
@@ -110,8 +115,9 @@ public sealed class AdvisorService(ReferenceData data,PayrollEngine engine,Repos
         if(request.Target is null&&useTools&&IntakeFields.Missing(e).Length==0&&AdvisorDialogue.WantsDifferent(text))
         {
             var category=text.Contains("חשמל",StringComparison.Ordinal)?"electric":text.Contains("משפח",StringComparison.Ordinal)?"family":state.RequestedCategory??(state.WantsElectric?"electric":"any");
-            var (answer,choices)=AdvisorDialogue.Alternatives(e,data,engine,category,state.Target);
-            return await ReplyAsync(e,new(choices.Length==0?"alternativeCatalogue":null,null,category=="electric",choices,category),text,answer,choices.ToList(),ct,toolUnavailable);
+            var rejected=AdvisorDialogue.RejectedChoices(state,category);
+            var (answer,choices)=AdvisorDialogue.Alternatives(e,data,engine,category,state.Target,rejected);
+            return await ReplyAsync(e,new(choices.Length==0?"alternativeCatalogue":null,null,category=="electric",choices,category,LastOfferedIds:choices.Length>0?choices:state.LastOfferedIds,RejectedCandidateIds:rejected.ToArray()),text,answer,choices.ToList(),ct,toolUnavailable);
         }
         if(state.Target is not null&&state.Target!="waiver"&&!data.Cars.Any(car=>car.Id==state.Target))state=state with{Target=null};
         // A saved question, rather than model memory or a client's claimed context,
@@ -234,7 +240,11 @@ public sealed class AdvisorService(ReferenceData data,PayrollEngine engine,Repos
                 await repository.CreateTicketAsync(e,target,DecisionMath.Question(engine,data,e,target),ct);
                 reply="חסר סכום השתתפות מאושר. שלחתי שאלה לנציג התחבורה. החלופה ממתינה לאישור; לא מוצג נטו סופי לרכב הזה. "+DecisionMath.Boundary(engine,data,e,target).Explanation;
             }
-            else reply=!useTools?FinancialText.Template(result):await NarrateAsync(result,ct);
+            else
+            {
+                reply=!useTools?FinancialText.Template(result):await NarrateAsync(result,ct);
+                if(target=="waiver"&&e.CurrentCar is null&&result.Delta==0)reply="לפי הנתונים שאישרת, אין לך כיום רכב חברה. ההשוואה היא מול מצב הוויתור הקיים שלך, ולכן אין שינוי בנטו.\n"+reply;
+            }
         }
         else if(candidates.Count>0)reply="כדי לזהות את הרכב לפי המפתח הרשמי, בחרו את הדגם המדויק מהרשימה. שם מסחרי לבדו לא מספיק.";
         else if(wantsElectric||state.RequestedCategory is "family" or "regular")
@@ -261,6 +271,7 @@ public sealed class AdvisorService(ReferenceData data,PayrollEngine engine,Repos
     }
     private async Task<object> ReplyAsync(Employee employee,AdvisorState state,string text,string reply,List<string> candidates,CancellationToken ct,bool aiFallback=false)
     {
+        if(candidates.Count>0&&state.AwaitingField!="currentCar")state=state with{LastOfferedIds=candidates.ToArray()};
         if(aiFallback)reply="כדי לוודא שהפרטים נקלטו נכון, בדקו אותם לפני המשך ההשוואה.\n"+reply;
         employee=employee with{AdvisorState=state};
         await repository.SaveConversationAsync(employee,state.Target,ct);

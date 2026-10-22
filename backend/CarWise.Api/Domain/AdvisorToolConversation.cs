@@ -157,8 +157,9 @@ public sealed class AdvisorToolConversation(IAiToolClient model,ReferenceData da
         }
         AdvisorToolOutcome FreshChoices()
         {
-            var (reply,selected)=AdvisorDialogue.Alternatives(current,data,engine,category,listAlternatives?previousTarget:null);
-            current=current with{AdvisorState=(current.AdvisorState??new()) with{Target=null,AwaitingField=selected.Length==0?"alternativeCatalogue":null,RequestedCategory=category,CandidateIds=selected,WantsElectric=category=="electric"}};
+            var rejected=listAlternatives?AdvisorDialogue.RejectedChoices(employee.AdvisorState??new(),category):new HashSet<string>(StringComparer.Ordinal);
+            var (reply,selected)=AdvisorDialogue.Alternatives(current,data,engine,category,listAlternatives?previousTarget:null,rejected);
+            current=current with{AdvisorState=(current.AdvisorState??new()) with{Target=null,AwaitingField=selected.Length==0?"alternativeCatalogue":null,RequestedCategory=category,CandidateIds=selected,WantsElectric=category=="electric",RejectedCandidateIds=rejected.ToArray(),LastOfferedIds=selected.Length>0?selected:employee.AdvisorState?.LastOfferedIds}};
             return new(current,reply,selected);
         }
         async Task<string> Apply(string? target,ExtractedData fields)

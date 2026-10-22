@@ -7,6 +7,20 @@ public static class AdvisorDialogue
     public static string? SocialReply(string text)=>Regex.IsMatch(text.Trim(),@"^(?:תודה(?: רבה| לך| רבה לך)?|מעולה(?: תודה)?|מצוין(?: תודה)?|אחלה(?: תודה)?|thanks|thank you)[!.\s🙏😊]*$",RegexOptions.IgnoreCase|RegexOptions.CultureInvariant,TimeSpan.FromMilliseconds(100))?"בשמחה! אני כאן אם תרצו לבדוק עוד משהו.":null;
     public static bool AcceptsReferral(string text)=>Regex.IsMatch(text,@"^(?:כן(?: בבקשה)?|כן,? (?:תפתח|תפתחי|שלח|שלחי)(?: פנייה| פניה)?|בבקשה)[.!]?$",RegexOptions.CultureInvariant,TimeSpan.FromMilliseconds(100));
     public static bool WantsDifferent(string text)=>Regex.IsMatch(text,@"(?:רכב|דגם|אפשרות|חלופה)\s+(?:חשמלי\s+)?אחר|(?:עוד|נוספ).{0,12}(?:רכב|דגם|אפשרות|חלופה)",RegexOptions.CultureInvariant,TimeSpan.FromMilliseconds(100));
+    public static bool AsksMissing(string text)=>Regex.IsMatch(text,@"(?:יש|האם|אילו|איזה|מה).{0,30}(?:נתונ|פרט|משהו).{0,20}(?:חסר|להשלים)|(?:אילו|איזה|מה).{0,15}חסר|חסר.{0,15}(?:משהו|נתונ|פרט)",RegexOptions.CultureInvariant,TimeSpan.FromMilliseconds(100));
+    public static string MissingStatus(Employee employee,ReferenceData data)
+    {
+        var missing=IntakeFields.Missing(employee);
+        if(missing.Length==0)return "לפי הפרטים שאישרת, כל נתוני השכר והרכב הדרושים לחישוב כבר מולאו. לא חסר כרגע נתון אישי לחישוב.";
+        var labels=new Dictionary<string,string>{{"salary","שכר בסיס"},{"commission","עמלות"},{"bonus","בונוס"},{"pension","אחוז הפרשת עובד לפנסיה"},{"fund","אחוז הפרשת עובד לקרן השתלמות"},{"credits","נקודות זיכוי"},{"children","מספר ילדים בגיל הזכאות"},{"currentCar","הרכב הנוכחי"},{"participation","ההשתתפות האישית ברכב הנוכחי"}};
+        return "להשלמת החישוב חסרים: "+string.Join(", ",missing.Select(field=>labels[field]))+". "+IntakeFields.Question(missing[0],data);
+    }
+    public static HashSet<string> RejectedChoices(AdvisorState state,string? category)
+    {
+        if(state.RequestedCategory is not null&&category!=state.RequestedCategory)return new(StringComparer.Ordinal);
+        return (state.RejectedCandidateIds??[]).Concat(state.CandidateIds is {Length:>0}?state.CandidateIds:state.LastOfferedIds??[])
+            .Concat(state.Target is {} target&&target!="waiver"?[target]:Array.Empty<string>()).ToHashSet(StringComparer.Ordinal);
+    }
     public static bool RequestsComparison(string text)=>Regex.IsMatch(text,
         @"(?:מה|איך).{0,25}(?:יקרה|ישתנה|ישנה).{0,25}נטו|כמה.{0,35}(?:נטו|ישנה|ישתנה|ארוויח|אפסיד)|(?:שוקל|רוצה|מעוניי?ן|מתכנן).{0,25}(?:לעבור|להחליף|לוותר)|לעבור לרכב|להשוות|השווה|איזה רכב.{0,20}(?:משתלם|כדאי)",
         RegexOptions.CultureInvariant,TimeSpan.FromMilliseconds(100));
@@ -25,13 +39,13 @@ public static class AdvisorDialogue
             !Regex.IsMatch(text,"מגיע לך|זכאי|זכאית|אישרתי|שלחתי|שמרתי|עדכנתי|תכתוב|כתבו|הקלד|רשמו");
     }
     public static string Question(string wording,ReferenceData data)=>wording.Replace("{CHILD_AGE}",data.Rules["familyTrack"]!["childMaxAge"]!.ToString(),StringComparison.Ordinal);
-    public static (string Reply,string[] Candidates) Alternatives(Employee employee,ReferenceData data,PayrollEngine engine,string? category,string? excluded)
+    public static (string Reply,string[] Candidates) Alternatives(Employee employee,ReferenceData data,PayrollEngine engine,string? category,string? excluded,IReadOnlySet<string>? rejected=null)
     {
         var selected=data.Cars.Where(car=>engine.Eligibility(employee,car).Eligible&&(category is null or "any" or "specific"||FleetRules.Accepts(category,car)))
-            .Where(car=>car.Id!=excluded).Select(car=>car.Id).ToArray();
+            .Where(car=>car.Id!=excluded&&rejected?.Contains(car.Id)!=true).Select(car=>car.Id).ToArray();
         var label=category=="electric"?"חשמלי":category=="family"?"במסלול המשפחתי":"";
         var reply=selected.Length==0?$"בקטלוג הנוכחי אין כרגע רכב {label} נוסף שמתאים לזכאות שלך. רוצה שאפתח פנייה לנציג לבירור חלופה נוספת?":
-            excluded is not null?"אלה הדגמים האחרים שמתאימים לזכאות שלך. איזה מהם מעניין אותך?":"אלה הדגמים שמתאימים לזכאות שלך. איזה מהם מעניין אותך?";
+            excluded is not null||rejected is {Count:>0}?"אלה הדגמים האחרים שמתאימים לזכאות שלך. איזה מהם מעניין אותך?":"אלה הדגמים שמתאימים לזכאות שלך. איזה מהם מעניין אותך?";
         return (reply,selected);
     }
     public static string[] SelectFacts(string text,IReadOnlyList<string> facts,IReadOnlyList<string> tools)

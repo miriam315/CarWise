@@ -18,6 +18,8 @@ def check(query, page, nav, screenshots):
                             'occupation': 'מפקח/ת איכות במפעל', 'group': 'א', 'currentCar': 'CAR-01',
                             'participation': 150, 'knownFields': None, 'advisorState': None}
     draft['employees'].append(alternatives_profile)
+    offered_profile = {**alternatives_profile, 'id': 'E-OFFERED-ONLY', 'name': 'בדיקת הצעה שנדחתה'}
+    draft['employees'].append(offered_profile)
     query('/admin/configuration', {'expectedRevision': config['revision'], 'configuration': draft, 'note': ''})
     for profile, text in zip(profiles, ['14200 ש"ח', 'השכר שלי 14200 ש"ח']):
         page.reload()
@@ -55,6 +57,18 @@ def check(query, page, nav, screenshots):
     tickets = [ticket for ticket in query('/tickets') if json.loads(ticket['employee'])['id'] == alternatives_profile['id']]
     assert len(tickets) == 1 and 'חשמלית' in tickets[0]['question'] and tickets[0]['status'] == 'pending'
     assert 'פתחתי פנייה' in reply['reply'] and reply['target'] is None
+    # Reject an OFFERED vehicle, without comparing it first; a status detour must retain the offer.
+    reply = query('/chat', {'employee': offered_profile, 'text': 'איזה רכב חשמלי מתאים לי?'})
+    assert reply['candidates'] == ['CAR-03'] and reply['target'] is None
+    reply = query('/chat', {'employee': offered_profile, 'text': 'יש נתונים חסרים בשכר שלי?'})
+    assert 'לא חסר כרגע נתון' in reply['reply'] and str(offered_profile['salary']) not in reply['reply']
+    for text in ['אני רוצה רכב אחר', 'אבל אני רוצה רכב אחר']:
+        reply = query('/chat', {'employee': offered_profile, 'text': text})
+        assert reply['candidates'] == [] and 'אין כרגע רכב חשמלי נוסף' in reply['reply']
+        assert 'רוצה שאפתח פנייה לנציג' in reply['reply']
+    reply = query('/chat', {'employee': offered_profile, 'text': 'כן בבקשה'})
+    assert 'פתחתי פנייה' in reply['reply']
+    assert len([ticket for ticket in query('/tickets') if json.loads(ticket['employee'])['id'] == offered_profile['id']]) == 1
     # Free-text names use exact catalogue rows; a thank-you must not run another search.
     employee = draft['employees'][0]
     reply = query('/chat', {'employee': employee, 'text': employee['question']})

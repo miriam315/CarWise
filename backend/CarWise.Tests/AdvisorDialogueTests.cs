@@ -180,4 +180,30 @@ public sealed class AdvisorDialogueTests
         var result=await service.RefreshKnownParticipationAsync(employee,default);
         Assert.Equal(0,db.ReadCalls);Assert.False(IntakeFields.Known(result,"participation"));
     }
+    [Fact] public async Task RejectedOfferedCarDoesNotReappearEvenWhenItWasNeverCompared()
+    {
+        var db=new ConversationDatabase();var employee=Data.Employees[0] with{Occupation="מפקח/ת איכות במפעל",CurrentCar=null};
+        var first=await Chat(Service(db,new ScriptedToolClient(_=>Call("start_comparison",new(){["category"]="electric"}),_=>Finish("{FACT_0}"))),employee,"איזה רכב חשמלי מתאים לי?");
+        Assert.Equal("CAR-03",Assert.Single(first["candidates"]!.AsArray())!.ToString());Assert.Null(first["target"]);
+        foreach(var request in new[]{"אני רוצה רכב אחר","אבל אני רוצה רכב אחר"})
+        {
+            var response=await Chat(Service(db,new ScriptedToolClient(_=>Call("list_alternatives",new(){["category"]="electric"}))),employee,request);
+            Assert.Empty(response["candidates"]!.AsArray());Assert.Contains("אין כרגע רכב חשמלי נוסף",response["reply"]!.ToString());Assert.Contains("נציג",response["reply"]!.ToString());
+        }
+        var result=await Chat(Service(db,new ScriptedToolClient()),employee,"כן בבקשה");
+        Assert.Contains("פתחתי פנייה",result["reply"]!.ToString());Assert.Single(await new Repository(db).TicketsAsync(employee.Id));
+    }
+    [Theory][InlineData(false)][InlineData(true)]
+    public async Task MissingStatusAnswersTheQuestionWithoutDumpingKnownSalaryAndStillAcceptsTheNextAnswer(bool missing)
+    {
+        var db=new ConversationDatabase();var employee=Data.Employees[0] with{KnownFields=missing?[..IntakeFields.All.Where(field=>field!="bonus")]:null};
+        var model=new ScriptedToolClient();var result=await Chat(Service(db,model),employee,"יש נתונים חסרים בשכר שלי?");
+        Assert.Equal(0,model.Calls);Assert.DoesNotContain(employee.Salary.ToString(),result["reply"]!.ToString());
+        if(!missing)Assert.Contains("לא חסר כרגע נתון",result["reply"]!.ToString());
+        else
+        {
+            Assert.Equal("bonus",result["awaitingField"]!.ToString());Assert.Contains("בונוס",result["reply"]!.ToString());
+            result=await Chat(Service(db,new ScriptedToolClient()),employee,"אין לי בונוס");Assert.Empty(result["missingFields"]!.AsArray());
+        }
+    }
 }
