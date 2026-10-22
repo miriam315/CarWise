@@ -45,4 +45,45 @@ public sealed class CommonsCarPhotoTests
         Assert.Contains("Wikimedia",error.Message);Assert.DoesNotContain("SENSITIVE",error.Message);
     }
     [Fact] public void EmptyFileMetadataDoesNotBreakSearchResults()=>Assert.Null(CommonsCarPhotos.Read(JsonNode.Parse("""{"imageinfo":[]}""")!));
+    [Theory][InlineData("http","2.5")][InlineData("http","4.0")][InlineData("https","2.5")]
+    public void SupportedLicenseMetadataMayUseHttpAndVersionTwoPointFive(string scheme,string version)
+    {
+        var page=Page("CC BY-SA "+version);page["imageinfo"]![0]!["extmetadata"]!["LicenseUrl"]!["value"]=$"{scheme}://creativecommons.org/licenses/by-sa/{version}/";
+        var item=CommonsCarPhotos.Read(page);Assert.NotNull(item);
+        Assert.Contains($"https://creativecommons.org/licenses/by-sa/{version}/",item.Credit);Assert.DoesNotContain("http://creativecommons.org",item.Credit);
+    }
+    [Theory][InlineData("https://creativecommons.org/licenses/by/4.0/")][InlineData("https://creativecommons.org.evil.test/licenses/by-sa/4.0/")][InlineData("https://creativecommons.org/licenses/by-sa/3.0/")]
+    public void LicenseNameAndCanonicalLicenseLinkMustAgree(string url)
+    {
+        var page=Page();page["imageinfo"]![0]!["extmetadata"]!["LicenseUrl"]!["value"]=url;
+        Assert.Null(CommonsCarPhotos.Read(page));
+    }
+    [Fact] public void ThumbnailMimeDeterminesTheActualDownloadedFormat()
+    {
+        var page=Page();page["imageinfo"]![0]!["mime"]="image/tiff";page["imageinfo"]![0]!["thumbmime"]="image/jpeg";
+        Assert.Equal("image/jpeg",CommonsCarPhotos.Read(page)!.Mime);
+    }
+    [Fact] public async Task EmptySearchIsDifferentFromFilteredResultsAndAnApiError()
+    {
+        async Task<List<CommonsCarPhoto>> Search(JsonObject body)
+        {
+            using var http=new HttpClient(new FakeHttp(request=>{
+                Assert.Contains("gsrlimit=24",request.RequestUri!.Query);
+                return new(HttpStatusCode.OK){Content=new StringContent(body.ToJsonString())};}));
+            return await new CommonsCarPhotos(http).SearchAsync("Toyota Corolla",default);
+        }
+        Assert.Empty(await Search(new(){["batchcomplete"]=""}));
+        var invalidPage=Page("CC BY-NC 4.0");
+        var filtered=await Assert.ThrowsAsync<ArgumentException>(()=>Search(new(){["query"]=new JsonObject{["pages"]=new JsonObject{["123"]=invalidPage}}}));
+        Assert.Contains("נמצאו 1",filtered.Message);
+        var provider=await Assert.ThrowsAsync<ArgumentException>(()=>Search(new(){["error"]=new JsonObject{["code"]="internal_api_error",["info"]="INTERNAL DETAIL"}}));
+        Assert.Contains("שגיאת חיפוש",provider.Message);Assert.DoesNotContain("INTERNAL DETAIL",provider.Message);
+    }
+    [Fact] public async Task MalformedSuccessResponseIsNotReportedAsNoPhotos()
+    {
+        using var http=new HttpClient(new FakeHttp(_=>new(HttpStatusCode.OK){Content=new StringContent("not JSON")}));
+        var error=await Assert.ThrowsAsync<ArgumentException>(()=>new CommonsCarPhotos(http).SearchAsync("Kia EV3",default));
+        Assert.Contains("תגובה שאינה תקינה",error.Message);
+    }
+
 }

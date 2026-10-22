@@ -7,7 +7,7 @@ namespace CarWise.Api.Administration;
 public sealed record CommonsCarPhoto(int PageId,string Title,string Credit,string Source,string License,string MediaUrl,string Mime);
 public sealed class CommonsCarPhotos(HttpClient http)
 {
-    private const string Api="https://commons.wikimedia.org/w/api.php?format=json&prop=imageinfo&iiprop=url%7Cmime%7Cextmetadata&iiurlwidth=1200&action=query&";
+    private const string Api="https://commons.wikimedia.org/w/api.php?format=json&prop=imageinfo&iiprop=url%7Cmime%7Cextmetadata&iiurlwidth=1200&iiextmetadatalanguage=en&iiextmetadatafilter=Artist%7CLicenseShortName%7CLicenseUrl&action=query&";
     private static string Text(string? html)=>WebUtility.HtmlDecode(Regex.Replace(html??"","<[^>]*>"," ",RegexOptions.None,TimeSpan.FromMilliseconds(200))).Trim();
     public static bool AllowedMediaUrl(string value)=>Uri.TryCreate(value,UriKind.Absolute,out var uri)&&uri.Scheme=="https"&&uri.Host=="upload.wikimedia.org"&&uri.Port==443&&uri.UserInfo==""&&uri.AbsolutePath.StartsWith("/wikipedia/commons/",StringComparison.Ordinal);
     private static string Meta(JsonNode? metadata,string field)=>Text(metadata?[field]?["value"]?.GetValue<string>());
@@ -17,8 +17,18 @@ public sealed class CommonsCarPhotos(HttpClient http)
         var info=(page["imageinfo"] as JsonArray)?.FirstOrDefault();if(info is null)return null;
         var metadata=info["extmetadata"];var license=Meta(metadata,"LicenseShortName");var licenseUrl=Meta(metadata,"LicenseUrl");
         var publicDomain=license is "CC0" or "Public domain";
-        if(!publicDomain&&!(Regex.IsMatch(license,@"^CC BY(?:-SA)? [1-4]\.0$")&&Uri.TryCreate(licenseUrl,UriKind.Absolute,out var uri)&&uri.Scheme=="https"&&uri.Host=="creativecommons.org"))return null;
-        var mime=info["mime"]?.GetValue<string>()??"";
+        if(!publicDomain)
+        {
+            var match=Regex.Match(license,@"^CC (?<family>BY(?:-SA)?) (?<version>[1-4]\.0|2\.5)$",RegexOptions.IgnoreCase);
+            if(!match.Success||!Uri.TryCreate(licenseUrl,UriKind.Absolute,out var uri)||uri.Scheme is not ("https" or "http")||
+                uri.Host!="creativecommons.org"||!uri.IsDefaultPort||uri.UserInfo!="")return null;
+            var prefix="/licenses/"+match.Groups["family"].Value.ToLowerInvariant()+"/"+match.Groups["version"].Value+"/";
+            if(!(uri.AbsolutePath.TrimEnd('/')+"/").StartsWith(prefix,StringComparison.OrdinalIgnoreCase))return null;
+            // A licence URL is attribution metadata, never an HTTP download target.
+            // Preserve ported licence paths but publish the canonical HTTPS link.
+            licenseUrl=new UriBuilder(uri){Scheme="https",Port=-1,Query="",Fragment=""}.Uri.AbsoluteUri;
+        }
+        var mime=(info["thumburl"] is not null?info["thumbmime"]?.GetValue<string>():null)??info["mime"]?.GetValue<string>()??"";
         var media=info["thumburl"]?.GetValue<string>()??info["url"]?.GetValue<string>()??"";
         var source=info["descriptionurl"]?.GetValue<string>()??"";
         if(mime is not ("image/jpeg" or "image/png" or "image/webp")||!AllowedMediaUrl(media)||!Uri.TryCreate(source,UriKind.Absolute,out var sourceUri)||sourceUri.Scheme!="https"||sourceUri.Host!="commons.wikimedia.org")return null;
@@ -33,13 +43,21 @@ public sealed class CommonsCarPhotos(HttpClient http)
         using var response=await GetAsync(Api+parameters,ct);
         if(!response.IsSuccessStatusCode)throw new ArgumentException("Wikimedia אינו נגיש כרגע. אפשר להעלות תמונות מהמחשב או לנסות שוב מאוחר יותר.");
         var bytes=await BytesAsync(response,1_000_000,ct);
-        var body=JsonNode.Parse(bytes);return body?["query"]?["pages"]?.AsObject()??new();
+        JsonNode? body;
+        try{body=JsonNode.Parse(bytes);}
+        catch(System.Text.Json.JsonException){throw new ArgumentException("Wikimedia החזיר תגובה שאינה תקינה. נסו שוב מאוחר יותר או העלו קובץ מהמחשב.");}
+        if(body is not JsonObject root||root["error"] is not null)throw new ArgumentException("Wikimedia החזיר שגיאת חיפוש. נסו שוב מאוחר יותר או העלו קובץ מהמחשב.");
+        if(root["query"] is JsonObject queryObject&&queryObject["pages"] is JsonObject pages)return pages;
+        if(root.ContainsKey("batchcomplete")&&root["query"] is null)return new();
+        throw new ArgumentException("Wikimedia לא החזיר תוצאות בפורמט צפוי. נסו שוב או העלו קובץ מהמחשב.");
     }
     public async Task<List<CommonsCarPhoto>> SearchAsync(string query,CancellationToken ct)
     {
         if(string.IsNullOrWhiteSpace(query)||query.Length>100)throw new ArgumentException("יש להזין דגם לחיפוש, עד 100 תווים.");
-        var pages=await MetadataAsync("generator=search&gsrnamespace=6&gsrlimit=12&gsrsearch="+Uri.EscapeDataString(query),ct);
-        return pages.Select(p=>p.Value is null?null:Read(p.Value)).OfType<CommonsCarPhoto>().ToList();
+        var pages=await MetadataAsync("generator=search&gsrnamespace=6&gsrlimit=24&gsrsearch="+Uri.EscapeDataString(query),ct);
+        var items=pages.Select(p=>p.Value is null?null:Read(p.Value)).OfType<CommonsCarPhoto>().ToList();
+        if(pages.Count>0&&items.Count==0)throw new ArgumentException($"נמצאו {pages.Count} תוצאות ב־Wikimedia, אך לא ניתן לייבא אותן לפי הרישיון, הקרדיט או הפורמט שהתקבלו. נסו חיפוש מדויק באנגלית או העלו תמונה מאושרת מהמחשב.");
+        return items;
     }
     public async Task<(byte[] Bytes,string Mime)> DownloadAsync(int pageId,CancellationToken ct)
     {
