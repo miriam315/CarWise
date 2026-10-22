@@ -1,0 +1,16 @@
+.git
+.agents
+.codex
+.local
+.env
+.env.*
+**/node_modules
+**/bin
+**/obj
+**/TestResults
+dist
+**/__pycache__
+**/*.pyc
+**/*.tsbuildinfo
+examples
+docs

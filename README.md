@@ -28,6 +28,10 @@ curl --fail http://127.0.0.1:8000/api/health
 
 `npm start` מפעיל את סביבת **Development** אלא אם `ASPNETCORE_ENVIRONMENT` כבר הוגדר. אין בכך כדי לבטל התחברות: מצב הדגמה ללא אימות דורש הגדרה מפורשת של `CarWise__DemoMode=true`. **אין לפרוס את מצב Development עם נתוני שכר אמיתיים.**
 
+## פריסה ל־Railway
+
+[מדריך פריסה מפורט](docs/railway.md): שירות Web אחד מקובץ Docker, Supabase קיים ו־Volume קבוע למפתחות. `railway.json` מגדיר בנייה ובדיקת מוכנות.
+
 ## חיבור ל־Supabase
 
 המתאם ל־Supabase קיים ב־`backend/CarWise.Api/Infrastructure/Database.cs`. הוא משתמש ב־PostgREST וב־RPC טרנזקציוניים. מפתח השירות נשאר בשרת, ולעולם אינו נכלל בקוד או ב־bundle של React.
