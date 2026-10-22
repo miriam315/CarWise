@@ -105,7 +105,8 @@ public sealed class PayrollEngine(ReferenceData data)
             if(car is {ParticipationKnown:false} && part is null){results.Add(new(){Id=id,Car=data.Enrich(car),Eligible=true,Pending=true,Budget=Number(data.Rules["budgets"]![e.Group]),Cost=car.Cost,Value=data.Lookup(car).Value,Reason="סכום ההשתתפות אינו ידוע; נדרש אישור נציג"});continue;}
             var values=Calculate(e,car,part);
             results.Add(new(values){Id=id,Car=car is null?null:data.Enrich(car),Eligible=true,Reason=reason,
-                Delta=values.Net-before.Net,Annual=(values.Net-before.Net)*12m,Pending=pending?.Contains(id)==true});
+                Delta=values.Net-before.Net,Annual=(values.Net-before.Net)*12m,Pending=pending?.Contains(id)==true,
+                Explanation=pending?.Contains(id)==true?null:NetExplanation.Compare(before,values)});
         }
         return new(e,before,results);
     }

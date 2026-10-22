@@ -73,6 +73,7 @@ public sealed record Alternative : Amounts
     public decimal Delta { get; init; }
     public decimal Annual { get; init; }
     public bool Pending { get; init; }
+    public NetExplanation? Explanation { get; init; }
     public Alternative(Amounts a) : base(a) { }
     public Alternative() { }
 }

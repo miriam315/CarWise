@@ -25,8 +25,9 @@ ROOT = Path(__file__).resolve().parent.parent
 OUTPUT = ROOT / '.local' / 'test-results'
 OUTPUT.mkdir(parents=True, exist_ok=True)
 parser = argparse.ArgumentParser(description=__doc__)
-parser.add_argument('--suite', action='append', choices=['fleet', 'intent', 'innovations', 'car-media'])
+parser.add_argument('--suite', action='append', choices=['fleet', 'intent', 'innovations', 'car-media', 'judge-demo'])
 parser.add_argument('--quick', action='store_true', help='OCR: test 2 documents instead of all 12')
+parser.add_argument('--video', action='store_true', help='Record judge rehearsal; requires Playwright ffmpeg')
 args = parser.parse_args()
 connection = os.environ.get('CARWISE_TEST_CONNECTION')
 if not connection:
@@ -48,7 +49,7 @@ def load_suite(name):
     return module
 
 
-for suite in args.suite or ['fleet', 'intent', 'innovations', 'car-media']:
+for suite in args.suite or ['fleet', 'intent', 'innovations', 'car-media', 'judge-demo']:
     dbname = 'carwise_e2e_' + uuid.uuid4().hex
     test_connection = re.sub(r'(?i)((?:^|;)\s*Database\s*=\s*)[^;]+', lambda m: m[1] + dbname, connection)
     subprocess.run(['docker', 'exec', container, 'createdb', '-U', db_user, dbname], check=True)
@@ -118,7 +119,8 @@ for suite in args.suite or ['fleet', 'intent', 'innovations', 'car-media']:
                 executable = shutil.which('chromium')
                 browser = playwright.chromium.launch(headless=True, args=['--no-sandbox'],
                                                       **({'executable_path': executable} if executable else {}))
-                page = browser.new_page(viewport={'width': 1440, 'height': 1100})
+                video={'record_video_dir':str(OUTPUT/'judge-video')} if suite=='judge-demo' and args.video else {}
+                page = browser.new_page(viewport={'width': 1440, 'height': 1100},**video)
                 page.goto(base)
                 page.wait_for_selector('.vehicle-card')
                 logo = page.get_by_role('img', name='שטראוס', exact=True)

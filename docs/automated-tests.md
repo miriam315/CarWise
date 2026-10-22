@@ -47,6 +47,7 @@ npm run test:e2e -- --suite fleet
 npm run test:e2e -- --suite intent
 npm run test:e2e -- --suite innovations --quick
 npm run test:e2e -- --suite car-media
+npm run verify:judges
 ```
 
 החיבור נלקח ממשתנה `CARWISE_TEST_CONNECTION`, או מחיבור PostgreSQL המקומי
@@ -78,3 +79,5 @@ npm run test:e2e -- --suite car-media
 
 הרצה מוצלחת אינה אישור אבטחה ואינה מכסה כל תלוש או תרחיש אפשרי. חיבור
 Supabase אמיתי, שליחת מיילים ותשובות AI מספק אמיתי אינם נבדקים בהרצה זו.
+
+חזרת השופטים נכללת בהרצה המאוחדת וב־CI. שישה מקרי בדיקה נוספים בודקים שבדיקת המוכנות לענן מזהה קבצים חסרים, חסימת מקור ותגובת HTML שגויה במקום JavaScript. [התסריט והיקף ההוכחה](hackathon-demo.md).

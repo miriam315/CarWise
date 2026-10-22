@@ -1,0 +1,88 @@
+{
+  "date": "2026-10-22",
+  "scope": [
+    "Server-calculated three-driver net explanation",
+    "Pending explanations redact all final financial results",
+    "Three-minute human demonstration script",
+    "Isolated browser rehearsal with step timings",
+    "Read-only deployment readiness command"
+  ],
+  "serverTests": {
+    "passed": 299,
+    "failed": 0,
+    "skipped": 3,
+    "newExplanationTests": 5,
+    "skipReason": "Separate Docker OCR integration suite; unchanged by this work."
+  },
+  "cloudReadinessFixtureTests": {
+    "passed": 6,
+    "failed": 0
+  },
+  "buildPassed": true,
+  "e2eSuites": [
+    {
+      "suite": "fleet",
+      "passed": true,
+      "seconds": 9.46
+    },
+    {
+      "suite": "intent",
+      "passed": true,
+      "seconds": 10.34
+    },
+    {
+      "suite": "innovations",
+      "passed": true,
+      "seconds": 35.14
+    },
+    {
+      "suite": "car-media",
+      "passed": true,
+      "seconds": 10.06
+    },
+    {
+      "suite": "judge-demo",
+      "passed": true,
+      "seconds": 9.6
+    }
+  ],
+  "judgeRehearsal": {
+    "passed": true,
+    "environment": "isolated local PostgreSQL, demo identity, rule-based chat; no hosted Auth or paid AI claim",
+    "seconds": 3.86,
+    "steps": [
+      {
+        "step": "Read-only readiness confirms actual local server, database and built assets",
+        "elapsedSeconds": 0.08
+      },
+      {
+        "step": "Missing salary prompts one question; no final net",
+        "elapsedSeconds": 1.821
+      },
+      {
+        "step": "Dense PDF locally extracted, reviewed and explicitly saved",
+        "elapsedSeconds": 2.362
+      },
+      {
+        "step": "Unknown participation automatically escalated; no final amount leaked",
+        "elapsedSeconds": 2.67
+      },
+      {
+        "step": "Agent answered through actual representative screen",
+        "elapsedSeconds": 2.821
+      },
+      {
+        "step": "Same conversation resumed with reconciled three-driver summary",
+        "elapsedSeconds": 3.22
+      },
+      {
+        "step": "Approved choice and conversation persist after reload; mobile fits",
+        "elapsedSeconds": 3.86
+      }
+    ],
+    "documentUploads": 0,
+    "note": "Elapsed time is an automated local rehearsal, not a cloud SLA or human presentation duration."
+  },
+  "publicDeploymentVerified": false,
+  "publicDeploymentLimitation": "No public application URL supplied. Readiness was verified on the isolated local server and controlled HTTP fixtures; hosted authentication and paid AI were not exercised."
+}

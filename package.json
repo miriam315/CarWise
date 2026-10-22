@@ -8,7 +8,7 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 0.0.0.0",
     "server": "node scripts/dotnet.mjs run --project backend/CarWise.Api --no-launch-profile",
-    "test": "node scripts/browser-payroll-tests.mjs && node scripts/dotnet.mjs test backend/CarWise.Tests --nologo",
+    "test": "node --test scripts/check-cloud-tests.mjs && node scripts/browser-payroll-tests.mjs && node scripts/dotnet.mjs test backend/CarWise.Tests --nologo",
     "start": "npm run server",
     "server:build": "node scripts/dotnet.mjs build backend/CarWise.Api --nologo",
     "db:start": "node scripts/dev-db.mjs",
@@ -24,7 +24,9 @@
     "verify:fleet": "python3 scripts/verify-fleet.py",
     "verify:intent": "python3 scripts/verify-intent.py",
     "test:e2e": "python3 scripts/test-e2e.py",
-    "test:all": "npm test && npm run build && npm run test:e2e"
+    "test:all": "npm test && npm run build && npm run test:e2e",
+    "verify:judges": "python3 scripts/test-e2e.py --suite judge-demo",
+    "verify:cloud": "node scripts/check-cloud.mjs"
   },
   "dependencies": {
     "@fontsource/heebo": "^5.3.0",

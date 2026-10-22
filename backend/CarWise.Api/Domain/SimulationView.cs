@@ -14,7 +14,8 @@ public static class SimulationView
         var result=JsonSerializer.SerializeToNode(simulation,JsonDefaults.Options)!;
         result["complete"]=true;result["missingFields"]=new JsonArray();
         foreach(var item in result["results"]!.AsArray())
-            if(item!["pending"]!.GetValue<bool>()||!item["eligible"]!.GetValue<bool>())foreach(var key in Numbers)item[key]=null;
+            if(item!["pending"]!.GetValue<bool>()||!item["eligible"]!.GetValue<bool>())
+            {foreach(var key in Numbers)item[key]=null;item["explanation"]=null;}
         return result;
     }
 }
