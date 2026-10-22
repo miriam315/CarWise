@@ -36,6 +36,26 @@ public sealed class PayslipAvailabilityTests
         Assert.False((await PayslipAvailability.ReadAsync(ai,null,default)).Enabled);
         var db=new MemoryConfigurationDatabase();var vault=new SecretVault(db,new EphemeralDataProtectionProvider(),new ConfigurationBuilder().Build());
         var state=new ConfigurationState(new(new(0,DateTimeOffset.UtcNow,"test","test",config,[]),Source));
-        await Assert.ThrowsAsync<ArgumentException>(()=>new ConfigurationService(db,state,new(Source),vault).SaveAsync(new(0,config,"invalid enabled binding"),"admin",default));
+        var service=new ConfigurationService(db,state,new(Source),vault);
+        var cars=config.Cars.Select((c,i)=>i==0?c with{Photos=[new(new string('a',64),"exterior","Test credit")]}:c).ToList();
+        var saved=await service.SaveAsync(new(0,config with{Cars=cars},"save photo while legacy payslip service is unavailable"),"admin",default);
+        Assert.Single(saved.Configuration.Cars[0].Photos);Assert.False((await PayslipAvailability.ReadAsync(saved.Configuration.Ai,vault,default)).Enabled);
+        var disabled=await service.SaveAsync(new(saved.Revision,saved.Configuration with{Ai=ai with{PayslipEnabled=false}},"disable unavailable payslip service"),"admin",default);
+        await Assert.ThrowsAsync<ArgumentException>(()=>service.SaveAsync(new(disabled.Revision,disabled.Configuration with{Ai=ai},"explicit reactivation still needs a document model"),"admin",default));
     }
+    [Fact] public async Task CatalogueSaveDoesNotRecheckAnUnchangedDocumentModelWhoseKeyIsUnavailable()
+    {
+        var db=new MemoryConfigurationDatabase();var vault=new SecretVault(db,new EphemeralDataProtectionProvider(),new ConfigurationBuilder().Build());
+        var missing=new AiProfile{SupportsDocuments=true,KeyReference="environment:CARWISE_AI_NOT_CONFIGURED"};
+        var ai=new AiConfiguration(false,missing,missing){PayslipEnabled=true};
+        var config=new ManagedConfiguration(Source.Rules.DeepClone(),Source.Cars,Source.OccupationDocuments,Source.Employees,ai);
+        var state=new ConfigurationState(new(new(0,DateTimeOffset.UtcNow,"test","test",config,[]),Source));var service=new ConfigurationService(db,state,new(Source),vault);
+        var cars=config.Cars.Select((c,i)=>i==0?c with{Photos=[new(new string('b',64),"exterior","Test credit")]}:c).ToList();
+        var saved=await service.SaveAsync(new(0,config with{Cars=cars},"vehicle photo is independent of missing document key"),"admin",default);
+        Assert.Single(saved.Configuration.Cars[0].Photos);
+        var status=await PayslipAvailability.ReadAsync(saved.Configuration.Ai,vault,default);Assert.False(status.Enabled);Assert.Equal("key_required",status.Code);
+        var changed=ai with{Extraction=missing with{Model="another-document-model"}};
+        await Assert.ThrowsAsync<ArgumentException>(()=>service.SaveAsync(new(saved.Revision,saved.Configuration with{Ai=changed},"changing an active model still requires a key"),"admin",default));
+    }
+
 }

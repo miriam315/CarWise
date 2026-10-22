@@ -82,7 +82,7 @@ public sealed class ConfiguredCompletionClient(AiProfile profile,SecretVault vau
     }
     private async Task<string> SendAsync(string name,JsonNode schema,string instructions,string text,Action<JsonNode?> observe,AiDocument? document,string key,CancellationToken ct)
     {
-        using var client=clients.CreateClient("AiProviders");
+        using var client=clients.CreateClient(profile.CustomProvider?"AiCustomProviders":"AiProviders");
         client.BaseAddress=new Uri(profile.BaseUrl.TrimEnd('/')+"/");client.Timeout=TimeSpan.FromSeconds(profile.TimeoutSeconds);
         if(profile.Provider is "openai" or "compatible")
         {

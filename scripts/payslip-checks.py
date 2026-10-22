@@ -77,9 +77,10 @@ def check(query,page,nav,screenshots):
     picker.set_input_files({'name':'failure.png','mimeType':'image/png','buffer':pix.tobytes('png')});prepare(page)
     failed=[]
     def failure(route):
-        failed.append(route.request.url);route.fulfill(status=503,content_type='application/json',body=json.dumps({'error':'ספק AI אינו זמין'}))
+        failed.append(route.request.url);route.fulfill(status=503,content_type='application/json',body=json.dumps({'error':'לא הצלחנו לחלץ את הנתונים כרגע. אפשר לנסות שוב או להזין ידנית.','details':'SYNTHETIC ADMIN DIAGNOSTIC','code':'insufficient_quota'}))
     page.route('**/api/payslip/extract?**',failure);send.click()
-    expect(page.locator('.payslip-panel .error-banner')).to_contain_text('ספק AI אינו זמין')
+    expect(page.locator('.payslip-panel .error-banner')).to_contain_text('לא הצלחנו לחלץ')
+    expect(page.locator('.payslip-panel .error-banner')).not_to_contain_text('SYNTHETIC ADMIN DIAGNOSTIC')
     expect(page.locator('.payslip-review')).to_have_count(0);assert len(failed)==1
     page.unroute('**/api/payslip/extract?**',failure)
     # Server itself rejects missing consent, even if a caller bypasses the UI.

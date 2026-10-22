@@ -29,7 +29,7 @@ public sealed class ConfigurationService(IJsonDatabase database,ConfigurationSta
         await RefreshAsync(ct);var current=state.Current.Document;
         var pools=new Dictionary<string,object[]>();
         foreach(var model in current.Configuration.Ai.RegisteredModels())pools[model.Id]=await PoolAsync(model.Profile,ct);
-        return new{current.Revision,current.SavedAt,current.Actor,current.Note,current.Configuration,
+        return new{current.Revision,policyRevision=current.PolicyVersion,current.PolicySavedAt,current.PolicyActor,current.PolicyNote,current.Operations,current.SavedAt,current.Actor,current.Note,current.Configuration,
             history=current.History.Select(h=>new{h.Revision,h.SavedAt,h.Actor,h.Note}),
             keyStatus=new{extraction=await HasKeyAsync(current.Configuration.Ai.ProfileFor("extraction"),ct),narration=await HasKeyAsync(current.Configuration.Ai.ProfileFor("narration"),ct)},
             keyPools=pools,payslipStatus=await PayslipAvailability.ReadAsync(current.Configuration.Ai,vault,ct)};
@@ -57,7 +57,7 @@ public sealed class ConfigurationService(IJsonDatabase database,ConfigurationSta
         {
             await RefreshAsync(ct);var current=state.Current.Document;
             if(request.ExpectedRevision!=current.Revision)throw new ConfigurationConflictException();
-            if(string.IsNullOrWhiteSpace(request.Note)||request.Note.Length>500)throw new ArgumentException("יש לציין סיבת שינוי עד 500 תווים");
+            if(request.Note?.Length>500)throw new ArgumentException("סיבת שינוי מוגבלת ל־500 תווים");
             if(request.Configuration is null)throw new ArgumentException("חסרות הגדרות");
             var config=JsonDefaults.Read<ManagedConfiguration>(JsonDefaults.Serialize(request.Configuration));
             _=validator.Validate(config,await OfficialAsync(config,ct));
@@ -90,13 +90,43 @@ public sealed class ConfigurationService(IJsonDatabase database,ConfigurationSta
                 }
             }
             var validated=validator.Validate(config,await OfficialAsync(config,ct));config=config with{Employees=validated.Employees};
-            if(config.Ai.PayslipEnabled&&PayslipAvailability.DocumentProfile(config.Ai) is not {SupportsDocuments:true})throw new ArgumentException("יש לבחור מודל לחילוץ תלושים התומך ב־PDF ובתמונות");
-            var services=new List<string>();if(config.Ai.Enabled)services.AddRange(["extraction","narration"]);if(config.Ai.PayslipEnabled)services.Add("payslip");
+            // Readiness belongs to an activation or a changed service profile. An unchanged,
+            // unavailable AI service must never block unrelated catalogue/policy saves.
+            AiProfile? Profile(AiConfiguration ai,string service)=>service=="payslip"?PayslipAvailability.DocumentProfile(ai):ai.ProfileFor(service);
+            bool Changed(string service,bool enabled,bool previouslyEnabled)=>enabled&&(!previouslyEnabled||
+                !JsonNode.DeepEquals(JsonNode.Parse(JsonDefaults.Serialize(Profile(config.Ai,service))),JsonNode.Parse(JsonDefaults.Serialize(Profile(current.Configuration.Ai,service)))));
+            var services=new List<string>();
+            foreach(var service in new[]{"extraction","narration"})if(Changed(service,config.Ai.Enabled,current.Configuration.Ai.Enabled))services.Add(service);
+            if(Changed("payslip",config.Ai.PayslipEnabled,current.Configuration.Ai.PayslipEnabled))services.Add("payslip");
             foreach(var service in services)
-                if(!await HasKeyAsync((service=="payslip"?PayslipAvailability.DocumentProfile(config.Ai)!:config.Ai.ProfileFor(service)),ct))throw new ArgumentException("הפעלת שירות AI דורשת מפתח זמין למודל המשויך אליו.");
-            var history=new List<ConfigurationVersion>{new(current.Revision,current.SavedAt,current.Actor,current.Note,current.Configuration)};
-            history.AddRange(current.History);history=history.Take(10).ToList();
-            var next=new ConfigurationDocument(current.Revision+1,DateTimeOffset.UtcNow,actor,request.Note.Trim(),config,history);
+            {
+                var profile=Profile(config.Ai,service);
+                if(service=="payslip"&&profile is not {SupportsDocuments:true})throw new ArgumentException("יש לבחור מודל לחילוץ תלושים התומך ב־PDF ובתמונות");
+                if(profile is null||!await HasKeyAsync(profile,ct))throw new ArgumentException("הפעלת שירות AI או שינוי המודל שלו דורשים מפתח זמין למודל המשויך אליו.");
+            }
+            var policyChanged=ConfigurationChanges.PolicyChanged(current.Configuration,config);
+            if(policyChanged&&string.IsNullOrWhiteSpace(request.Note))throw new ArgumentException("לשינוי מדיניות יש לציין סיבת שינוי עד 500 תווים");
+            if(JsonNode.DeepEquals(JsonNode.Parse(JsonDefaults.Serialize(current.Configuration)),JsonNode.Parse(JsonDefaults.Serialize(config))))return current;
+            var now=DateTimeOffset.UtcNow;
+            var history=current.History.ToList();
+            if(policyChanged)
+            {
+                history.Insert(0,new(current.PolicyVersion,current.PolicySavedAt??current.SavedAt,current.PolicyActor??current.Actor,current.PolicyNote??current.Note,ConfigurationChanges.Policy(current.Configuration)));
+                history=history.Take(10).ToList();
+            }
+            var employeeIds=current.Configuration.Employees.Select(e=>e.Id).Union(config.Employees.Select(e=>e.Id)).Where(id=>
+                !JsonNode.DeepEquals(JsonNode.Parse(JsonDefaults.Serialize(current.Configuration.Employees.SingleOrDefault(e=>e.Id==id))),JsonNode.Parse(JsonDefaults.Serialize(config.Employees.SingleOrDefault(e=>e.Id==id))))).ToList();
+            var carIds=current.Configuration.Cars.Select(c=>c.Id).Union(config.Cars.Select(c=>c.Id)).Where(id=>
+                !JsonNode.DeepEquals(JsonNode.Parse(JsonDefaults.Serialize(current.Configuration.Cars.SingleOrDefault(c=>c.Id==id)?.Photos??[])),JsonNode.Parse(JsonDefaults.Serialize(config.Cars.SingleOrDefault(c=>c.Id==id)?.Photos??[])))).ToList();
+            var operations=current.Operations.ToList();if(employeeIds.Count>0||carIds.Count>0)operations.Insert(0,new(now,actor,employeeIds,carIds));
+            var next=new ConfigurationDocument(current.Revision+1,now,actor,request.Note?.Trim()??"",config,history)
+            {
+                PolicyRevision=current.PolicyVersion+(policyChanged?1:0),
+                PolicySavedAt=policyChanged?now:current.PolicySavedAt??current.SavedAt,
+                PolicyActor=policyChanged?actor:current.PolicyActor??current.Actor,
+                PolicyNote=policyChanged?request.Note?.Trim():current.PolicyNote??current.Note,
+                Operations=operations.Take(100).ToList()
+            };
             var saved=await database.TryWriteRuleAsync("admin-active",current.Revision==0?null:current.Revision,JsonNode.Parse(JsonDefaults.Serialize(next))!,ct);
             if(!saved)throw new ConfigurationConflictException();
             state.Publish(new(next,validated));return next;
@@ -107,7 +137,9 @@ public sealed class ConfigurationService(IJsonDatabase database,ConfigurationSta
     {
         await RefreshAsync(ct);var current=state.Current.Document;
         var previous=current.History.SingleOrDefault(h=>h.Revision==request.Revision)??throw new ArgumentException("הגרסה אינה בהיסטוריה הזמינה");
-        return await SaveAsync(new(request.ExpectedRevision,previous.Configuration,request.Note),actor,ct);
+        var operational=current.Configuration;
+        var restored=previous.Configuration with{Employees=operational.Employees,Cars=previous.Configuration.Cars.Select(c=>c with{Photos=operational.Cars.SingleOrDefault(p=>p.Id==c.Id)?.Photos??[]}).ToList()};
+        return await SaveAsync(new(request.ExpectedRevision,restored,request.Note),actor,ct);
     }
 }
 public sealed class ConfigurationRefreshWorker(ConfigurationService settings,ILogger<ConfigurationRefreshWorker> logger) : BackgroundService

@@ -78,7 +78,7 @@ def check(base,query,settings,service_token):
   assert completed['salary']==18000 and completed['pension']==6 and completed['currentCar'] is None and completed['participation']==0
 
   screenshots=Path(__file__).resolve().parent.parent/'.local/screenshots';screenshots.mkdir(parents=True,exist_ok=True)
-  page.get_by_role('button',name='יציאה מהחשבון',exact=True).click();page.get_by_role('tab',name='כניסת מנהל',exact=True).click();page.screenshot(path=str(screenshots/'admin-login.png'),full_page=True)
+  page.get_by_role('button',name='יציאה מהחשבון',exact=True).click();page.screenshot(path=str(screenshots/'admin-login.png'),full_page=True)
   page.get_by_label('דוא״ל להתחברות',exact=True).fill('admin@example.test');page.get_by_label('סיסמה להתחברות',exact=True).fill('TEST-ONLY-ADMIN-PASSWORD-123');page.get_by_role('button',name='כניסה למערכת',exact=True).click();page.wait_for_selector('.admin-page');admin=page.evaluate("sessionStorage.getItem('carwise-access-token')")
   expect(page.locator('.signed-in-user')).to_contain_text('admin@example.test');page.get_by_label('עובד לצפייה',exact=True).select_option(new_employee)
   page.get_by_role('button',name='פתיחת תצוגת העובד',exact=True).click();page.wait_for_selector('.vehicle-card')

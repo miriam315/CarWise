@@ -29,6 +29,9 @@ def check(query,page,nav,screenshots):
     expect(page.get_by_role('heading',name='נשלים רק את מה שחסר.',exact=True)).to_be_visible()
     page.get_by_role('button',name='השלמת נתונים בשיחה',exact=True).click()
     expect(page.locator('.chat-messages')).to_contain_text('מה שכר הבסיס החודשי')
+    expect(page.locator('.chat-messages')).not_to_contain_text('מפתח בשרת')
+    expect(page.locator('body')).not_to_contain_text('יועץ מבוסס כללים')
+    expect(page.locator('.chat-messages')).not_to_contain_text('ניהול שיחה באמצעות AI')
     step('Missing salary prompts one question; no final net')
 
     nav('הנתונים שלי')

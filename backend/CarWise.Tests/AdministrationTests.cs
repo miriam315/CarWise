@@ -70,7 +70,7 @@ public sealed class AdministrationTests
     }
     [Fact] public async Task RevisionConflictDoesNotOverwriteAnotherAdministrator()
     {
-        var (service,db,_)=Setup();await service.SaveAsync(new(0,Default(),"first edit"),"admin-a",default);
+        var (service,db,_)=Setup();var changed=Copy(Default());changed.Rules["electric"]!["netBonus"]=300;await service.SaveAsync(new(0,changed,"first edit"),"admin-a",default);
         var other=Setup(db).Service;
         await Assert.ThrowsAsync<ConfigurationConflictException>(()=>other.SaveAsync(new(0,Default(),"stale edit"),"admin-b",default));
         Assert.Contains("first edit",db.Dump());Assert.DoesNotContain("stale edit",db.Dump());

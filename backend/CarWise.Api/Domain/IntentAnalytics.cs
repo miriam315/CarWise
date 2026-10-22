@@ -135,7 +135,7 @@ public sealed class IntentAnalytics(IJsonDatabase db,ConfigurationSnapshot snaps
                 else {var result=simulation.Results.Single(r=>r.Id==target);bucket=!result.Eligible?"ineligible":result.Pending?"pending":result.Delta<0?"loss":result.Delta>0?"gain":"neutral";}
             }
             var events=IntentRules.Prune(old.Events,today,Policy.RetentionDays);
-            void Add(string eventKind,string? eventReason){if(!events.Any(v=>v.Day==today&&v.Kind==eventKind&&v.Target==target&&v.Reason==eventReason&&v.Bucket==bucket))events.Add(new(today,eventKind,target,category,bucket,eventReason,snapshot.Document.Revision));}
+            void Add(string eventKind,string? eventReason){if(!events.Any(v=>v.Day==today&&v.Kind==eventKind&&v.Target==target&&v.Reason==eventReason&&v.Bucket==bucket))events.Add(new(today,eventKind,target,category,bucket,eventReason,snapshot.Document.PolicyVersion));}
             Add("explore",null);if(kind!="explore")Add(kind,reason);
             if(events.SequenceEqual(old.Events))return;
             if(await Write(id,old,old with{Events=events.TakeLast(300).ToList()},ct))return;
@@ -243,10 +243,10 @@ public sealed class IntentAnalytics(IJsonDatabase db,ConfigurationSnapshot snaps
         for(var i=0;i<n;i++)
         {
             var e=engine.Validate(basis with{Id="DEMO-INTENT-"+i,Name="",Question="",CurrentModel="",AdvisorState=null,KnownFields=null,Salary=18000+i*100,Commission=1000,Bonus=0,Pension=6,Fund=2.5m,Credits=2.25m,Children=4,Participation=350,CurrentCar=current.Id});
-            var events=new List<IntentEvent>{new(today.AddDays(-8),"explore",target,input.Category,i%4==0?"gain":"loss",null,snapshot.Document.Revision)};
-            if(i<n/2)events.Add(new(today.AddDays(-input.Days-8),"explore",target,input.Category,"loss",null,snapshot.Document.Revision));
-            if(i<Policy.MinimumCohort)events.Add(new(today.AddDays(-2),"choice_saved",target,input.Category,"gain",null,snapshot.Document.Revision));
-            if(i<Policy.MinimumCohort*2)events.Add(new(today.AddDays(-3),"feedback",target,input.Category,"loss","net",snapshot.Document.Revision));
+            var events=new List<IntentEvent>{new(today.AddDays(-8),"explore",target,input.Category,i%4==0?"gain":"loss",null,snapshot.Document.PolicyVersion)};
+            if(i<n/2)events.Add(new(today.AddDays(-input.Days-8),"explore",target,input.Category,"loss",null,snapshot.Document.PolicyVersion));
+            if(i<Policy.MinimumCohort)events.Add(new(today.AddDays(-2),"choice_saved",target,input.Category,"gain",null,snapshot.Document.PolicyVersion));
+            if(i<Policy.MinimumCohort*2)events.Add(new(today.AddDays(-3),"feedback",target,input.Category,"loss","net",snapshot.Document.PolicyVersion));
             var overrides=new Dictionary<string,decimal>();
             if(target!="waiver")
             {

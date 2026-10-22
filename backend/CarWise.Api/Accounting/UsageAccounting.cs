@@ -51,7 +51,7 @@ public sealed class UsageAccounting(IJsonDatabase database,ConfigurationSnapshot
         var host=new Uri(profile.BaseUrl).Host;
         var price=snapshot.Document.Configuration.Ai.Pricing.SingleOrDefault(p=>p.Provider==profile.Provider&&p.Host==host&&p.Model==profile.Model);
         var record=new AiUsageRecord("usage:"+DateTimeOffset.UtcNow.ToString("yyyyMMddHHmmssfffffff")+":"+Guid.NewGuid().ToString("N"),
-            DateTimeOffset.UtcNow,null,context.ConversationId,context.ActionId,operation,profile.Provider,host,profile.Model,snapshot.Document.Revision,
+            DateTimeOffset.UtcNow,null,context.ConversationId,context.ActionId,operation,profile.Provider,host,profile.Model,snapshot.Document.PolicyVersion,
             price,rates.Current,"pending",null,null,null,null){CredentialId=credentialId,CredentialName=credentialName,Attempt=attempt,InvocationId=invocationId};
         // Reserve durably before contacting a paid API. A crash leaves an explicit unknown/pending record.
         await StoreAsync(record,ct);return record;

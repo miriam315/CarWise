@@ -7,14 +7,14 @@ import './car-gallery.css';
 
 export const carPhotoUrl=(photo:CarPhoto)=>'/media/cars/'+photo.id+'.jpg';
 const labels={exterior:'חוץ הרכב',interior:'פנים הרכב',spin:'360°'};
-export default function CarGallery({car,color}:{car:Car;color?:string}){
+export default function CarGallery({car,color,management=false}:{car:Car;color?:string;management?:boolean}){
  const photos=car.photos||[];
  const cover=photos.find(p=>p.view==='exterior')||photos[0];
  const [open,setOpen]=useState(false),[failed,setFailed]=useState('');
- return <div className="car-gallery-cover">{cover&&failed!==cover.id?<img className="car-art car-photo" src={carPhotoUrl(cover)} alt={`${car.brand} ${car.model} — תמונה להמחשה`} loading="lazy" width={1200} height={800} onError={()=>setFailed(cover.id)}/>:<CarArt color={color}/>}{photos.length>0&&<><span className="car-photo-caption">תמונה להמחשה</span><button type="button" className="car-gallery-open" aria-label={`הגדלת תמונות ${car.model}`} onClick={()=>setOpen(true)}><Expand size={17}/> תמונות הרכב</button></>}{open&&photos.length>0&&createPortal(<GalleryViewer key={car.id+'-'+photos.map(p=>p.id+p.view).join('-')} car={car} onClose={()=>setOpen(false)}/>,document.body)}</div>;
+ return <div className="car-gallery-cover">{cover&&failed!==cover.id?<img className="car-art car-photo" src={carPhotoUrl(cover)} alt={`${car.brand} ${car.model} — תמונה להמחשה`} loading="lazy" width={1200} height={800} onError={()=>setFailed(cover.id)}/>:<CarArt color={color}/>}{photos.length>0&&<><span className="car-photo-caption">תמונה להמחשה</span><button type="button" className="car-gallery-open" aria-label={`הגדלת תמונות ${car.model}`} onClick={()=>setOpen(true)}><Expand size={17}/> תמונות הרכב</button></>}{open&&photos.length>0&&createPortal(<GalleryViewer key={car.id+'-'+photos.map(p=>p.id+p.view).join('-')} car={car} management={management} onClose={()=>setOpen(false)}/>,document.body)}</div>;
 }
 
-function GalleryViewer({car,onClose}:{car:Car;onClose:()=>void}){
+function GalleryViewer({car,onClose,management}:{car:Car;onClose:()=>void;management:boolean}){
  const photos=car.photos||[];
  const spinPhotos=photos.filter(p=>p.view==='spin');
  const spinReady=new Set(spinPhotos.map(p=>p.id)).size>=12;
@@ -32,8 +32,8 @@ function GalleryViewer({car,onClose}:{car:Car;onClose:()=>void}){
   if(e.target===dialog.current||e.target instanceof HTMLImageElement){if(e.key==='ArrowRight')select(index+1);if(e.key==='ArrowLeft')select(index-1)}
   if(e.key==='Tab'){const controls=Array.from(dialog.current!.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),[tabindex="0"]'));const first=controls[0],last=controls.at(-1);if(e.shiftKey&&(document.activeElement===first||document.activeElement===dialog.current)){e.preventDefault();last?.focus()}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first?.focus()}}
  }}><header><div><h2>{car.model}</h2><p>{car.brand} · {car.year} · תמונות להמחשה</p></div><button type="button" className="icon-button" aria-label="סגירת גלריית הרכב" onClick={onClose}><X/></button></header>
- <div className="car-gallery-tabs" role="tablist" aria-label="סוג תמונות הרכב">{(['exterior','interior','spin'] as const).map(kind=><button type="button" key={kind} role="tab" aria-selected={kind===view} disabled={!groups[kind].length} onClick={()=>{setView(kind);setIndex(0);setZoom(100);setError(false)}}>{labels[kind]}{kind==='spin'&&<RotateCcw size={17}/>}</button>)}</div>
- {!spinReady&&<p className="car-gallery-hint">תצוגת 360° זמינה רק לאחר הוספת לפחות 12 צילומים מסודרים סביב אותו רכב.</p>}
+ <div className="car-gallery-tabs" role="tablist" aria-label="סוג תמונות הרכב">{(['exterior','interior','spin'] as const).filter(kind=>management||groups[kind].length>0).map(kind=><button type="button" key={kind} role="tab" aria-selected={kind===view} disabled={!groups[kind].length} onClick={()=>{setView(kind);setIndex(0);setZoom(100);setError(false)}}>{labels[kind]}{kind==='spin'&&<RotateCcw size={17}/>}</button>)}</div>
+ {management&&!spinReady&&<p className="car-gallery-hint">תצוגת 360° זמינה רק לאחר הוספת לפחות 12 צילומים מסודרים סביב אותו רכב.</p>}
  <div className={'car-gallery-stage '+(view==='spin'?'spin-stage':'')} onPointerDown={e=>{if(view==='spin'){e.preventDefault();e.currentTarget.setPointerCapture(e.pointerId);drag.current={x:e.clientX,index}}}} onPointerMove={e=>{if(drag.current&&view==='spin')select(drag.current.index+Math.round((e.clientX-drag.current.x)/9))}} onPointerUp={()=>{drag.current=null}} onPointerCancel={()=>{drag.current=null}}>
  {photo&&!error?<img src={carPhotoUrl(photo)} alt={`${car.model} — ${labels[view]}, תמונה ${index+1}`} draggable={false} style={{width:`${zoom}%`,height:`${zoom}%`,maxWidth:'none'}} onError={()=>setError(true)}/>:<p role="status">התמונה אינה זמינה. אפשר לבחור תמונה אחרת.</p>}
  </div><div className="car-gallery-controls"><button type="button" className="outline-button" disabled={filtered.length<2} aria-label="תמונת הרכב הקודמת" onClick={()=>select(index-1)}><ChevronRight/></button><span aria-live="polite">{index+1} / {filtered.length}{view==='spin'&&` · ${Math.round(index*360/filtered.length)}°`}</span><button type="button" className="outline-button" disabled={filtered.length<2} aria-label="תמונת הרכב הבאה" onClick={()=>select(index+1)}><ChevronLeft/></button><label>הגדלה {zoom}%<input type="range" aria-label="הגדלת תמונת הרכב" min={100} max={250} step={10} value={zoom} onChange={e=>setZoom(Number(e.target.value))}/></label></div>

@@ -70,7 +70,7 @@ public static class PayslipExtraction
     public static void MapPayslips(this WebApplication app)
     {
         app.MapGet("/api/payslip/status",(ConfigurationSnapshot snapshot,SecretVault vault,CancellationToken ct)=>PayslipAvailability.ReadAsync(snapshot.Document.Configuration.Ai,vault,ct));
-        app.MapPost("/api/payslip/extract",async(HttpContext context,ConfigurationSnapshot snapshot,AccessControl access,SecretVault vault,
+        app.MapPost("/api/payslip/extract",async Task<IResult> (HttpContext context,ConfigurationSnapshot snapshot,AccessControl access,SecretVault vault,
             IHttpClientFactory clients,UsageAccounting accounting,AiKeyHealth health,AiOperationContext operation,CancellationToken ct)=>{
             context.Response.Headers.CacheControl="no-store";
             var employee=context.Request.Query["employee"].ToString();access.Employee(context,employee);
@@ -82,9 +82,17 @@ public static class PayslipExtraction
             if(!status.Enabled)throw new ArgumentException(status.Message);
             operation.ConversationId=employee;
             var bytes=await UploadReader.ReadAsync(context,8*1024*1024,ct);
-            return await ExtractReviewedAsync(bytes,consent,reviewed,ai,snapshot.Document.Revision,
-                (profile,document,prompt,token)=>new ConfiguredCompletionClient(profile,vault,clients,accounting:accounting,health:health)
-                    .CompleteDocumentAsync("extract_payslip",Schema(),prompt,document,token),ct);
+            try
+            {
+                return Results.Ok(await ExtractReviewedAsync(bytes,consent,reviewed,ai,snapshot.Document.PolicyVersion,
+                    (profile,document,prompt,token)=>new ConfiguredCompletionClient(profile,vault,clients,accounting:accounting,health:health)
+                        .CompleteDocumentAsync("extract_payslip",Schema(),prompt,document,token),ct));
+            }
+            catch(Exception error)when(!ct.IsCancellationRequested&&error is AiUnavailableException or HttpRequestException or OperationCanceledException or System.Text.Json.JsonException)
+            {
+                var failure=PayslipFailure.From(error);
+                return Results.Json(new{error="לא הצלחנו לחלץ את הנתונים מהתלוש כרגע. אפשר לנסות שוב או להזין את הנתונים ידנית.",details=failure.Message,code=failure.Code,failure.ProviderStatus,failure.Parameter},statusCode:503);
+            }
         }).WithMetadata(new Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute("documents"));
     }
 }

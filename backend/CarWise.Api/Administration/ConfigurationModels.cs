@@ -8,6 +8,8 @@ namespace CarWise.Api.Administration;
 public sealed record AiProfile
 {
     public string Provider {get;init;}="openai";
+    public bool CustomProvider {get;init;}=false;
+    public bool CustomEndpointApproved {get;init;}=false;
     public string DisplayName {get;init;}="";
     public string Model {get;init;}="gpt-4.1-mini";
     public string BaseUrl {get;init;}="https://api.openai.com/v1/";
@@ -55,8 +57,23 @@ public sealed record ManagedConfiguration(JsonNode Rules,List<Car> Cars,List<Dic
     public IntentPolicy IntentAnalytics {get;init;}=new();
 }
 public sealed record ConfigurationVersion(long Revision,DateTimeOffset SavedAt,string Actor,string Note,ManagedConfiguration Configuration);
+public sealed record OperationalChange(DateTimeOffset At,string Actor,List<string> EmployeeIds,List<string> CarIds);
 public sealed record ConfigurationDocument(long Revision,DateTimeOffset SavedAt,string Actor,string Note,
-    ManagedConfiguration Configuration,List<ConfigurationVersion> History);
+    ManagedConfiguration Configuration,List<ConfigurationVersion> History)
+{
+    public long? PolicyRevision {get;init;}
+    [JsonIgnore] public long PolicyVersion=>PolicyRevision??Revision;
+    public DateTimeOffset? PolicySavedAt {get;init;}
+    public string? PolicyActor {get;init;}
+    public string? PolicyNote {get;init;}
+    public List<OperationalChange> Operations {get;init;}=[];
+}
+public static class ConfigurationChanges
+{
+    public static ManagedConfiguration Policy(ManagedConfiguration config)=>config with{Employees=[],Cars=config.Cars.Select(c=>c with{Photos=[]}).ToList()};
+    public static bool PolicyChanged(ManagedConfiguration before,ManagedConfiguration after)=>!JsonNode.DeepEquals(
+        JsonNode.Parse(JsonSerializer.Serialize(Policy(before))),JsonNode.Parse(JsonSerializer.Serialize(Policy(after))));
+}
 public sealed record SaveConfigurationRequest(long ExpectedRevision,ManagedConfiguration Configuration,string Note,
     Dictionary<string,string>? ApiKeys=null,Dictionary<string,Dictionary<string,string>>? BackupApiKeys=null);
 public sealed record RestoreConfigurationRequest(long ExpectedRevision,long Revision,string Note);

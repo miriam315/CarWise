@@ -141,7 +141,7 @@ public sealed class AdvisorService(ReferenceData data,PayrollEngine engine,Repos
     }
     private async Task<object> ReplyAsync(Employee employee,AdvisorState state,string text,string reply,List<string> candidates,CancellationToken ct,bool aiFallback=false)
     {
-        if(aiFallback)reply="שירות ה־AI אינו זמין כרגע. רק נתונים בניסוח מפורש נקלטו; בדקו את הפרטים לפני בחירה.\n"+reply;
+        if(aiFallback)reply="כדי לוודא שהפרטים נקלטו נכון, בדקו אותם לפני המשך ההשוואה.\n"+reply;
         employee=employee with{AdvisorState=state};
         await repository.SaveConversationAsync(employee,state.Target,ct);
         await repository.AddMessageAsync(employee.Id,"user",text,ct);await repository.AddMessageAsync(employee.Id,"assistant",reply,ct);

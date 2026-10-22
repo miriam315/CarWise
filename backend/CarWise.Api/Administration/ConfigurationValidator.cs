@@ -105,7 +105,8 @@ public sealed class ConfigurationValidator(ReferenceData officialSource)
             var priceKeys=new HashSet<string>();
             foreach(var price in config.Ai.Pricing!)
             {
-                ValidateAi(new AiProfile{Provider=price.Provider,BaseUrl="https://"+price.Host+"/",Model=price.Model});
+                var registered=config.Ai.RegisteredModels().Select(m=>m.Profile).FirstOrDefault(p=>p.CustomProvider&&p.Provider==price.Provider&&new Uri(p.BaseUrl).Host==price.Host);
+                ValidateAi(registered is null?new AiProfile{Provider=price.Provider,BaseUrl="https://"+price.Host+"/",Model=price.Model}:registered with{Model=price.Model});
                 if(price.Host!=new Uri("https://"+price.Host+"/").Host)Fail("דומיין תמחור אינו תקין");
                 if(!priceKeys.Add(price.Provider+"/"+price.Host+"/"+price.Model))Fail("תמחור כפול לאותו מודל וספק");
                 if(new[]{price.InputUsdPerMillion,price.CachedInputUsdPerMillion,price.OutputUsdPerMillion,price.CacheWriteUsdPerMillion??0}.Any(v=>v<0||v>100000)
@@ -124,11 +125,13 @@ public sealed class ConfigurationValidator(ReferenceData officialSource)
         if(profile.MaxOutputTokens is <128 or >8192)Fail($"מגבלת הפלט היא {profile.MaxOutputTokens}; יש להזין בין 128 ל־8,192 טוקנים");
         if(profile.TimeoutSeconds is <5 or >90)Fail($"זמן ההמתנה הוא {profile.TimeoutSeconds}; יש להזין בין 5 ל־90 שניות");
         if(!Uri.TryCreate(profile.BaseUrl,UriKind.Absolute,out var uri)||uri.Scheme!="https"||!uri.IsDefaultPort||!string.IsNullOrEmpty(uri.UserInfo)||!string.IsNullOrEmpty(uri.Query)||!string.IsNullOrEmpty(uri.Fragment))Fail("כתובת AI חייבת להיות HTTPS ללא פרטי גישה, פורט או פרמטרים");
+        if(profile.CustomProvider&&(!profile.CustomEndpointApproved||string.IsNullOrWhiteSpace(profile.DisplayName)))Fail("ספק ידני דורש שם ואישור מפורש של כתובת ה־API");
+        if(profile.CustomProvider&&!CarWise.Api.AI.PublicAiConnection.ValidHost(uri!.Host))Fail("כתובת ספק ידני חייבת להיות דומיין ציבורי, ללא כתובות IP או שמות פנימיים");
         var allowed=new Dictionary<string,string[]>{["openai"]=["api.openai.com"],["anthropic"]=["api.anthropic.com"],["gemini"]=["generativelanguage.googleapis.com"],
             ["compatible"]=["api.openai.com","api.groq.com","api.mistral.ai","openrouter.ai","api.deepseek.com","api.together.xyz","api.fireworks.ai"]};
         var custom=(Environment.GetEnvironmentVariable("CARWISE_AI_ALLOWED_HOSTS")??"").Split(',',StringSplitOptions.RemoveEmptyEntries|StringSplitOptions.TrimEntries);
         var customAllowed=profile.Provider=="compatible"&&custom.Contains(uri!.Host,StringComparer.OrdinalIgnoreCase)&&Uri.CheckHostName(uri.Host)==UriHostNameType.Dns&&!uri.IsLoopback;
-        if(!customAllowed&&!allowed[profile.Provider].Contains(uri!.Host,StringComparer.OrdinalIgnoreCase))Fail("הדומיין אינו ברשימת ספקי ה־AI המותרים. אין לשלוח מפתחות לכתובת שרירותית");
+        if(!profile.CustomProvider&&!customAllowed&&!allowed[profile.Provider].Contains(uri!.Host,StringComparer.OrdinalIgnoreCase))Fail("הדומיין אינו ברשימת ספקי ה־AI המותרים. אין לשלוח מפתחות לכתובת שרירותית");
         if(profile.BackupKeys is null||profile.BackupKeys.Count>7||profile.BackupKeys.Any(k=>k is null))Fail("ניתן להגדיר עד שבעה מפתחות גיבוי בנוסף לראשי");
         if(profile.BackupKeys!.Select(k=>k.Id).Distinct().Count()!=profile.BackupKeys!.Count)Fail("מזהי מפתחות כפולים");
         foreach(var key in profile.BackupKeys!)

@@ -123,7 +123,7 @@ public sealed class FleetService(FleetStore store,ConfigurationSnapshot snapshot
             var e=await Employee(id,ct);var approved=await repository.ParticipationAsync(id,ct);
             return new{employee=e with{Name="",Question="",CurrentModel="",AdvisorState=null},approved.Overrides,approved.Pending};
         }
-        var serialized=JsonDefaults.Serialize(new{configurationRevision=snapshot.Document.Revision,left=await Source(left.EmployeeId),right=await Source(right.EmployeeId),left.AssignmentStamp,rightStamp=right.AssignmentStamp});
+        var serialized=JsonDefaults.Serialize(new{configurationRevision=snapshot.Document.PolicyVersion,left=await Source(left.EmployeeId),right=await Source(right.EmployeeId),left.AssignmentStamp,rightStamp=right.AssignmentStamp});
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(serialized)));
     }
     public async Task<FleetNet> Net(Employee employee,string incoming,CancellationToken ct)

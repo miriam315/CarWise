@@ -129,6 +129,7 @@ builder.Services.AddSingleton<ExchangeRates>();builder.Services.AddSingleton<Usa
 builder.Services.AddScoped<AiOperationContext>();builder.Services.AddScoped<UsageAccounting>();
 builder.Services.AddHttpClient("ExchangeRates",client=>client.Timeout=TimeSpan.FromSeconds(20)).ConfigurePrimaryHttpMessageHandler(()=>new SocketsHttpHandler{AllowAutoRedirect=false,UseCookies=false});
 builder.Services.AddHostedService<ExchangeRateWorker>();
+builder.Services.AddHttpClient("AiCustomProviders").ConfigurePrimaryHttpMessageHandler(()=>new SocketsHttpHandler{AllowAutoRedirect=false,UseCookies=false,UseProxy=false,ConnectCallback=PublicAiConnection.ConnectAsync});
 builder.Services.AddHttpClient("AiProviders").ConfigurePrimaryHttpMessageHandler(()=>new SocketsHttpHandler{AllowAutoRedirect=false,UseCookies=false});
 builder.Services.AddScoped<IDataExtractionService>(sp=>{
     var ai=sp.GetRequiredService<ConfigurationSnapshot>().Document.Configuration.Ai;

@@ -93,7 +93,7 @@ public static class DecisionRoutes
                 var best=available.OrderByDescending(r=>r.Net).ThenBy(r=>r.Id,StringComparer.Ordinal).First();
                 points.Add(new{x,currentNet=current.Net,targetNet=after.Net,delta=after.Net-current.Net,bestTarget=best.Id,bestNet=best.Net});
             }
-            return Results.Ok(new{configurationRevision=snapshot.Document.Revision,conditional=known is null||request.HypotheticalParticipation is not null||request.Axis=="participation",profileUnchanged=true,
+            return Results.Ok(new{configurationRevision=snapshot.Document.PolicyVersion,conditional=known is null||request.HypotheticalParticipation is not null||request.Axis=="participation",profileUnchanged=true,
                 boundary=car is null?null:DecisionMath.Boundary(engine,data,scenario,request.Target),outcome,points,
                 note="תרחיש בלבד לפי הכללים הפעילים. נקודות הגרף הן דגימות; גבול השתתפות מחושב בדיוק בנפרד. הנתונים המקוריים לא שונו."});
         });
@@ -153,7 +153,7 @@ public static class DecisionRoutes
                         }
                         var policyChanged=!JsonNode.DeepEquals(choice.Rules,data.Rules);var versionChanged=choice.OfficialVersionId!=snapshot.Document.Configuration.OfficialVersionId;
                         change=new{status=!after.Eligible?"ineligible":after.Pending?"pending":"ready",policyChanged,officialVersionChanged=versionChanged,
-                            previousRevision=choice.ConfigurationRevision,currentRevision=snapshot.Document.Revision,oldNet=before.Net,newNet=after.Eligible&&!after.Pending?(decimal?)after.Net:null,
+                            previousRevision=choice.ConfigurationRevision,currentRevision=snapshot.Document.PolicyVersion,oldNet=before.Net,newNet=after.Eligible&&!after.Pending?(decimal?)after.Net:null,
                             oldDelta=before.Delta,newDelta=after.Eligible&&!after.Pending?(decimal?)after.Delta:null,
                             impact=after.Eligible&&!after.Pending?(decimal?)(after.Net-before.Net):null,changes,
                             explanation="החישוב חוזר על נתוני השכר שנשמרו בזמן הבחירה, לפי המדיניות והמאגר הפעילים בלבד. זו השפעת שינוי נתונים על אותו תרחיש, לא תחזית שכר עתידית."};
@@ -161,7 +161,7 @@ public static class DecisionRoutes
                 }
                 catch(ArgumentException){change=new{status="review",message="נתוני הבחירה אינם מתאימים לקטלוג או לעיסוק הפעיל. נדרשת בדיקה מחדש."};}
             }
-            return new{revision=saved.Revision,months,choice=saved.Choice,change,configurationRevision=snapshot.Document.Revision};
+            return new{revision=saved.Revision,months,choice=saved.Choice,change,configurationRevision=snapshot.Document.PolicyVersion};
         });
         app.MapPost("/api/decision/choice",async(SaveChoiceRequest request,HttpContext context,AccessControl access,ConfigurationSnapshot snapshot,Repository repository,DecisionStore store,IntentAnalytics intents,CancellationToken ct)=>
         {
@@ -171,7 +171,7 @@ public static class DecisionRoutes
             if(!chosen.Eligible||chosen.Pending)throw new ArgumentException("אפשר לשמור למעקב רק בחירה זכאית שסכומיה ידועים ומאושרים");
             var before=await store.Read(e.Id,ct);if(before.Revision!=request.ExpectedRevision)throw new ArgumentException("הנתונים השתנו. רעננו ונסו שוב.");
             var minimized=e with{Name="",Question="",CurrentModel="",AdvisorState=null};
-            var choice=new ChoiceSnapshot(DateTimeOffset.UtcNow,snapshot.Document.Revision,snapshot.Document.Configuration.OfficialVersionId,minimized,request.Target,sim.Current,chosen,snapshot.Data.Rules.DeepClone()){CurrentCar=snapshot.Data.Cars.SingleOrDefault(c=>c.Id==e.CurrentCar) is {} currentCar?snapshot.Data.Enrich(currentCar):null};
+            var choice=new ChoiceSnapshot(DateTimeOffset.UtcNow,snapshot.Document.PolicyVersion,snapshot.Document.Configuration.OfficialVersionId,minimized,request.Target,sim.Current,chosen,snapshot.Data.Rules.DeepClone()){CurrentCar=snapshot.Data.Cars.SingleOrDefault(c=>c.Id==e.CurrentCar) is {} currentCar?snapshot.Data.Enrich(currentCar):null};
             var saved=await store.Write(e.Id,before,before.Months,choice,ct);
             await intents.Observe(context,access,e.Id,request.Target,"choice_saved",ct);
             return saved;

@@ -136,7 +136,7 @@ public sealed class AiRoutingTests
         var factory=new ProviderTestFactory(_=>{calls++;return Ok();});
         await Assert.ThrowsAsync<AiUnavailableException>(()=>new ConfiguredCompletionClient(profile,vault,factory).CompleteAsync("probe",new JsonObject(),"test","test",default));Assert.Equal(0,calls);
         var config=new ManagedConfiguration(Source.Rules,Source.Cars,Source.OccupationDocuments,Source.Employees,new(true,profile,profile));
-        var state=new ConfigurationState(new(new(0,DateTimeOffset.UtcNow,"test","test",config,[]),Source));
+        var state=new ConfigurationState(new(new(0,DateTimeOffset.UtcNow,"test","test",config with{Ai=config.Ai with{Enabled=false}},[]),Source));
         await Assert.ThrowsAsync<ArgumentException>(()=>new ConfigurationService(db,state,new(Source),vault).SaveAsync(new(0,config,"cannot enable without a usable key"),"admin",default));
         Assert.Empty(await db.ReadAsync("carwise_rules",new Dictionary<string,string>{{"id","admin-active"}}));
     }
