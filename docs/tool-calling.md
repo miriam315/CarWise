@@ -23,3 +23,9 @@ Enable conversation AI, assign a native-tool-capable model to the conversation-u
 Recommended managed prompts: [ai-prompts.md](ai-prompts.md). Legacy extraction JSON instructions are superseded by the mandatory native-tool protocol in code without overwriting administrators' saved prompts.
 
 Run `node scripts/dotnet.mjs test backend/CarWise.Tests` for native provider protocol, loop, argument/identity guards, actual engine and repository workflows, limits, retries, accounting and probe tests. Existing browser suites cover employee/representative continuation, policy and contribution precedence, fleet controls and model administration. All automated provider responses are synthetic; a successful live provider call and the deployed Railway environment need separate verification with the configured model. No paid provider calls are made by the automated suite.
+
+## Catalogue names and new conversations
+
+`VehicleSearch` normalizes spacing, punctuation, letter/digit boundaries and common Hebrew transliterations against the active catalogue. A unique explicit model can invoke the existing calculation without a UI selection or a planning-model round. FROM/TO names are separated; a conflicting approved current car requires profile confirmation. Duplicate model/year rows require clarification. Eligibility and official-value checks still run. A short thank-you preserves context without invoking tools or showing old candidate buttons. Native searches distinguish absent models from filtered/ineligible models.
+
+`POST /api/chat/new` uses the same employee authorization and per-employee chat gate. It keeps approved payroll and representative tickets, clears advisor state, and persists a history boundary on the conversation employee snapshot. Earlier messages remain stored but are excluded from the new UI/model context. Profile saves preserve that server-owned boundary. No schema migration or destructive history deletion is required.

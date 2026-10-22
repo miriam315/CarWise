@@ -241,7 +241,7 @@ app.MapPost("/api/profile",async(SimulateRequest request,HttpContext context,Acc
 {
     AuthorizeEmployee(context,access,request.Employee);
     var previous=await repository.ConversationAsync(request.Employee.Id,ct);
-    var employee=engine.Validate(request.Employee with{AdvisorState=previous?.Employee.AdvisorState});
+    var employee=engine.Validate(request.Employee with{AdvisorState=previous?.Employee.AdvisorState,ChatHistoryStart=previous?.Employee.ChatHistoryStart??0});
     if(employee.AdvisorState is {} state)employee=employee with{AdvisorState=state with{AwaitingField=IntakeFields.Missing(employee).FirstOrDefault()}};
     await repository.SaveConversationAsync(employee,employee.AdvisorState?.Target,ct);return employee;
 });
@@ -261,8 +261,8 @@ app.MapGet("/api/tickets",async(HttpContext context,CancellationToken ct)=>
 });
 app.MapGet("/api/history/{employee}",async(string employee,HttpContext context,AccessControl access,ReferenceData reference,CancellationToken ct)=>
 {
-    access.Employee(context,employee);var messages=await repository.HistoryAsync(employee,ct);
-    var saved=await repository.ConversationAsync(employee,ct);var state=saved?.Employee.AdvisorState;
+    access.Employee(context,employee);var saved=await repository.ConversationAsync(employee,ct);
+    var messages=await repository.HistoryAsync(employee,ct,saved?.Employee.ChatHistoryStart??0);var state=saved?.Employee.AdvisorState;
     var candidates=state?.AwaitingField=="currentCar"?reference.Cars.Select(car=>car.Id).ToArray():
         saved is not null&&IntakeFields.Missing(saved.Employee).Length==0?state?.CandidateIds:null;
     var last=messages.FindLastIndex(message=>message.Role=="assistant");
@@ -289,6 +289,11 @@ app.MapPost("/api/chat",async(ChatRequest request,HttpContext context,AccessCont
         }
     }
     return result;
+});
+app.MapPost("/api/chat/new",async(SimulateRequest request,HttpContext context,AccessControl access,AdvisorService advisor,CancellationToken ct)=>
+{
+    AuthorizeEmployee(context,access,request.Employee);
+    return new{employee=await advisor.StartNewChatAsync(request.Employee,ct)};
 });
 app.MapPost("/api/tickets",async(TicketRequest request,HttpContext context,AccessControl access,PayrollEngine engine,ReferenceData reference,CancellationToken ct)=>
 {

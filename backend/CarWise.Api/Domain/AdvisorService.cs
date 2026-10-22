@@ -11,6 +11,20 @@ public sealed class AdvisorService(ReferenceData data,PayrollEngine engine,Repos
         ["טסלה"]="CAR-14",["אוקטביה"]="CAR-15",["טוסון"]="CAR-12",["דולפין"]="CAR-03",["נירו"]="CAR-05",
         ["סנטה"]="CAR-20",["קונה"]="CAR-08",["פיקנטו"]="CAR-01",["קורולה קרוס"]="CAR-09",["מאזדה"]="CAR-13",["סיל"]="CAR-17"};
     private static readonly SemaphoreSlim[] Gates=Enumerable.Range(0,128).Select(_=>new SemaphoreSlim(1,1)).ToArray();
+    public async Task<Employee> StartNewChatAsync(Employee employee,CancellationToken ct)
+    {
+        var gate=Gates[(StringComparer.Ordinal.GetHashCode(employee.Id)&int.MaxValue)%Gates.Length];
+        await gate.WaitAsync(ct);
+        try
+        {
+            var saved=await repository.ConversationAsync(employee.Id,ct);
+            var history=await repository.HistoryAsync(employee.Id,ct);
+            var current=saved?.Employee??data.Employees.Single(e=>e.Id==employee.Id);
+            current=engine.Validate(current with{AdvisorState=null,ChatHistoryStart=history.Count});
+            await repository.SaveConversationAsync(current,null,ct);return current;
+        }
+        finally{gate.Release();}
+    }
     public async Task<Employee> RefreshKnownParticipationAsync(Employee employee,CancellationToken ct)
     {
         if(IntakeFields.Known(employee,"currentCar")&&employee.CurrentCar is null)return IntakeFields.Answer(employee,"participation",0);
@@ -38,11 +52,12 @@ public sealed class AdvisorService(ReferenceData data,PayrollEngine engine,Repos
         var text=request.Text?.Trim()??"";
         if(text.Length is 0 or >2000)throw new ArgumentException("כתבו שאלה עד 2,000 תווים");
         var conversation=await repository.ConversationAsync(request.Employee.Id,ct);
-        var profile=!useTools&&suppliedFields is not null?request.Employee:conversation?.Employee??(request.Employee with{AdvisorState=null});
+        var profile=!useTools&&suppliedFields is not null?request.Employee:conversation?.Employee??(request.Employee with{AdvisorState=null,ChatHistoryStart=0});
         if(!canChangeOccupation)profile=profile with{Occupation=request.Employee.Occupation};
         var e=engine.Validate(profile);
         e=await RefreshKnownParticipationAsync(e,ct);
         var state=e.AdvisorState??new AdvisorState();
+        if(AdvisorDialogue.SocialReply(text) is {} social)return await ReplyAsync(e,state with{CandidateIds=null},text,social,[],ct);
         if(AdvisorScope.ClearlyUnrelated(text))return await ReplyAsync(e,state,text,AdvisorScope.Redirect,[],ct);
         if((state.AwaitingField=="alternativeCatalogue"||state.OfferedReferral is {} offered&&IntakeFields.Missing(e).Contains(offered))&&AdvisorDialogue.AcceptsReferral(text))
         {
@@ -53,12 +68,32 @@ public sealed class AdvisorService(ReferenceData data,PayrollEngine engine,Repos
             return await ReplyAsync(e,state with{AwaitingField=alternative?null:state.AwaitingField,OfferedReferral=null},text,"פתחתי פנייה לנציג לבירור "+(alternative?"חלופה נוספת שמתאימה לזכאות שלך":"הנתון החסר")+". עד לקבלת נתונים מאושרים לא אציג חישוב נטו סופי.",[],ct);
         }
         var numericAnswer=state.AwaitingField is {} savedField&&IntakeFields.All.Contains(savedField)&&!IntakeFields.Known(e,savedField)&&IntakeFields.IsNumericAnswer(text,savedField);
+        if(request.Target is null&&state.AwaitingField=="currentCar"&&!IntakeFields.Known(e,"currentCar")&&!AdvisorDialogue.RequestsComparison(text))
+        {
+            var namedCurrent=VehicleSearch.Find(text,data.Cars);
+            if(namedCurrent.Count==1)request=request with{Target=namedCurrent[0].Id};
+        }
+        if(request.Target is null&&!numericAnswer&&AdvisorDialogue.RequestsComparison(text)&&!ParticipationRules.ApprovalRequested(text)&&
+            !System.Text.RegularExpressions.Regex.IsMatch(text,"השתתפות|עמלות|בונוס|פנסיה|השתלמות|נקודות זיכוי|שכר"))
+        {
+            var (targets,sources)=VehicleSearch.Resolve(text,data.Cars);
+            if(sources.Count==1&&IntakeFields.Known(e,"currentCar")&&e.CurrentCar!=sources[0].Id)
+                return await ReplyAsync(e,state with{Target=null,AwaitingField="currentCarConfirmation",CandidateIds=null},text,"הרכב שממנו ביקשת לעבור שונה מהרכב שמאושר כרגע בפרופיל שלך. לפני החישוב צריך לאשר את הרכב הנוכחי ואת ההשתתפות האישית ב״הנתונים שלי״.",[],ct);
+            if(targets.Count==1&&state.AwaitingField!="currentCar")
+            {
+                if(sources.Count==1&&!IntakeFields.Known(e,"currentCar"))e=IntakeFields.Confirm(e with{CurrentCar=sources[0].Id,KnownFields=e.KnownFields?.Where(f=>f!="participation").ToArray()},"currentCar");
+                if(targets[0].Drive=="חשמלי"){state=state with{RequestedCategory="electric",WantsElectric=true};e=e with{AdvisorState=state};}
+                request=request with{Target=targets[0].Id};
+            }
+            else if(targets.Count>1)
+                return await ReplyAsync(e,state with{Target=null,AwaitingField="vehicleSelection",CandidateIds=targets.Select(car=>car.Id).ToArray()},text,"מצאתי כמה דגמים או שנות רישום שמתאימים. איזה מהם רצית להשוות?",targets.Select(car=>car.Id).ToList(),ct);
+        }
         var toolUnavailable=false;
         if(useTools&&tools is not null&&request.Target is null&&!numericAnswer)
         {
             try
             {
-                var history=await repository.HistoryAsync(e.Id,ct);
+                var history=await repository.HistoryAsync(e.Id,ct,e.ChatHistoryStart);
                 var result=await tools.RunAsync(request,e,history,async(next,fields,token)=>
                 {
                     suppressMessages=true;
@@ -70,9 +105,9 @@ public sealed class AdvisorService(ReferenceData data,PayrollEngine engine,Repos
             }
             catch(AiUnavailableException){toolUnavailable=true;}
         }
-        if(fleet is not null&&fleet.Policy.Enabled&&fleet.Policy.ShowToEmployees&&fleet.Policy.SwapEnabled&&IntakeFields.Missing(e).Length==0&&FleetRules.Category(text,out var fleetCategory))
+        if(request.Target is null&&fleet is not null&&fleet.Policy.Enabled&&fleet.Policy.ShowToEmployees&&fleet.Policy.SwapEnabled&&IntakeFields.Missing(e).Length==0&&FleetRules.Category(text,out var fleetCategory))
             return await ReplyAsync(e,state,text,await fleet.Advice(e,fleetCategory,ct),[],ct);
-        if(useTools&&IntakeFields.Missing(e).Length==0&&AdvisorDialogue.WantsDifferent(text))
+        if(request.Target is null&&useTools&&IntakeFields.Missing(e).Length==0&&AdvisorDialogue.WantsDifferent(text))
         {
             var category=text.Contains("חשמל",StringComparison.Ordinal)?"electric":text.Contains("משפח",StringComparison.Ordinal)?"family":state.RequestedCategory??(state.WantsElectric?"electric":"any");
             var (answer,choices)=AdvisorDialogue.Alternatives(e,data,engine,category,state.Target);
@@ -102,7 +137,7 @@ public sealed class AdvisorService(ReferenceData data,PayrollEngine engine,Repos
             return await ReplyAsync(e,state,text,"הערך אינו תקין לשדה שנשאל. "+IntakeFields.Question(awaiting,data),[],ct);
         if(!answered&&request.Target is null)
         {
-            var history=suppliedFields is null?await repository.HistoryAsync(e.Id,ct):[];
+            var history=suppliedFields is null?await repository.HistoryAsync(e.Id,ct,e.ChatHistoryStart):[];
             using var ai=CancellationTokenSource.CreateLinkedTokenSource(ct);ai.CancelAfter(limits.Extraction);
             try{fields=suppliedFields??(toolUnavailable?await new LocalExtractionService().ExtractAsync(text,e,[],ct):await extraction.ExtractAsync(text,e,history,ai.Token).WaitAsync(ai.Token));aiFallback=toolUnavailable;}
             catch(Exception error)when(!ct.IsCancellationRequested&&error is AiUnavailableException or HttpRequestException or OperationCanceledException)

@@ -89,10 +89,10 @@ public sealed class Repository(IJsonDatabase db)
         if(rows.Count>0)return TicketFrom(rows[0]!);
         var general=await GeneralTicketDocument(id,ct);return general is null?null:TicketFrom(general);
     }
-    public async Task<List<Message>> HistoryAsync(string employee,CancellationToken ct=default)
+    public async Task<List<Message>> HistoryAsync(string employee,CancellationToken ct=default,int skip=0)
     {
         var result=new List<Message>();
-        for(var offset=0;;)
+        for(var offset=Math.Max(0,skip);;)
         {
             var rows=await db.ReadAsync("carwise_messages",new Dictionary<string,string>{{"employee_id",employee}},offset:offset,ct:ct);
             if(rows.Count==0)break;result.AddRange(rows.Select(r=>new Message(r!["role"]!.GetValue<string>(),r["text"]!.GetValue<string>())));offset+=rows.Count;

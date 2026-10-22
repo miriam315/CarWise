@@ -55,4 +55,31 @@ def check(query, page, nav, screenshots):
     tickets = [ticket for ticket in query('/tickets') if json.loads(ticket['employee'])['id'] == alternatives_profile['id']]
     assert len(tickets) == 1 and 'חשמלית' in tickets[0]['question'] and tickets[0]['status'] == 'pending'
     assert 'פתחתי פנייה' in reply['reply'] and reply['target'] is None
+    # Free-text names use exact catalogue rows; a thank-you must not run another search.
+    employee = draft['employees'][0]
+    reply = query('/chat', {'employee': employee, 'text': employee['question']})
+    assert reply['target'] == 'CAR-10' and 'הנטו המשוער' in reply['reply']
+    reply = query('/chat', {'employee': employee, 'text': 'תודה רבה!'})
+    assert 'בשמחה' in reply['reply'] and reply['candidates'] == []
+    assert not query('/history/' + employee['id'])[-1].get('candidates')
+    # New chat is persisted on the server, keeps approved data/tickets and survives reload.
+    page.reload()
+    page.get_by_label('בחירת עובד לדוגמה', exact=True).select_option(alternatives_profile['id'])
+    page.get_by_role('button', name='פתיחת היועץ החכם', exact=True).click()
+    expect(page.locator('.chat-messages')).to_contain_text('פתחתי פנייה')
+    before = query('/conversation/' + alternatives_profile['id'])['employee']
+    with page.expect_response(lambda response: response.request.method == 'POST' and response.url.endswith('/api/chat/new')) as resetting:
+        page.get_by_role('button', name='שיחה חדשה', exact=True).click()
+    assert resetting.value.ok
+    expect(page.locator('.chat-messages .message.user')).to_have_count(0)
+    assert query('/history/' + alternatives_profile['id']) == []
+    saved = query('/conversation/' + alternatives_profile['id'])['employee']
+    assert saved['salary'] == before['salary'] and saved['chatHistoryStart'] > 0 and saved['advisorState'] is None
+    assert len([ticket for ticket in query('/tickets') if json.loads(ticket['employee'])['id'] == alternatives_profile['id']]) == 1
+    query('/profile', {'employee': alternatives_profile})  # A stale form cannot restore old context.
+    assert query('/history/' + alternatives_profile['id']) == []
+    page.reload()
+    page.get_by_role('button', name='פתיחת היועץ החכם', exact=True).click()
+    expect(page.locator('.chat-messages .message.user')).to_have_count(0)
+    expect(page.locator('.chat-messages')).not_to_contain_text('פתחתי פנייה')
     print('PASS: real chat accepts ASCII-quoted currency and labelled salary answers, confirms only the answered field, persists across reloads and advances intake using saved DB context.', flush=True)

@@ -25,6 +25,7 @@ public sealed record Employee
     [JsonRequired] public string? CurrentCar { get; init; }
     public string[]? KnownFields {get;init;}
     public AdvisorState? AdvisorState {get;init;}
+    public int ChatHistoryStart {get;init;}
     [JsonRequired] public decimal Participation { get; init; }
     public string CurrentModel { get; init; } = "";
     public string Question { get; init; } = "";

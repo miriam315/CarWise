@@ -4,6 +4,7 @@ namespace CarWise.Api.Domain;
 /// <summary>Conversation pacing is server-owned; tool context is not a transcript to dump.</summary>
 public static class AdvisorDialogue
 {
+    public static string? SocialReply(string text)=>Regex.IsMatch(text.Trim(),@"^(?:תודה(?: רבה| לך| רבה לך)?|מעולה(?: תודה)?|מצוין(?: תודה)?|אחלה(?: תודה)?|thanks|thank you)[!.\s🙏😊]*$",RegexOptions.IgnoreCase|RegexOptions.CultureInvariant,TimeSpan.FromMilliseconds(100))?"בשמחה! אני כאן אם תרצו לבדוק עוד משהו.":null;
     public static bool AcceptsReferral(string text)=>Regex.IsMatch(text,@"^(?:כן(?: בבקשה)?|כן,? (?:תפתח|תפתחי|שלח|שלחי)(?: פנייה| פניה)?|בבקשה)[.!]?$",RegexOptions.CultureInvariant,TimeSpan.FromMilliseconds(100));
     public static bool WantsDifferent(string text)=>Regex.IsMatch(text,@"(?:רכב|דגם|אפשרות|חלופה)\s+(?:חשמלי\s+)?אחר|(?:עוד|נוספ).{0,12}(?:רכב|דגם|אפשרות|חלופה)",RegexOptions.CultureInvariant,TimeSpan.FromMilliseconds(100));
     public static bool RequestsComparison(string text)=>Regex.IsMatch(text,

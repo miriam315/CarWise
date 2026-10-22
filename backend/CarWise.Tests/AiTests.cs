@@ -67,11 +67,13 @@ public sealed class AiTests
         var advisor=new AdvisorService(Data,new(Data),new(new ConversationDatabase()),
             new AiExtractionService(new AiGateway(http,"SELECTED-INTENT")),
             new AiNarrationService(new AiGateway(http,"SELECTED-NARRATION"),NullLogger<AiNarrationService>.Instance));
-        await advisor.ChatAsync(new(Data.Employees[0],"השווה ATTO 3",null,null),default);
+        await advisor.ChatAsync(new(Data.Employees[0],"השווה את הדגם שביקשתי",null,null),default);
         Assert.Equal(new[]{("SELECTED-INTENT","extract_employee_intent")},calls);
         var result=JsonNode.Parse(JsonDefaults.Serialize(await advisor.ChatAsync(new(Data.Employees[0],"בחרתי","CAR-10",null),default)))!;
         Assert.Equal(("SELECTED-NARRATION","narrate_comparison"),calls.Last());Assert.Equal(2,calls.Count);
         Assert.Contains("השוואה מחושבת",result["reply"]!.ToString());Assert.DoesNotContain("{NET}",result["reply"]!.ToString());
+        await advisor.ChatAsync(new(Data.Employees[0],"השווה BYD ATTO3",null,null),default);
+        Assert.Equal(3,calls.Count);Assert.Equal(("SELECTED-NARRATION","narrate_comparison"),calls.Last());
     }
     [Fact] public async Task UnrelatedModelProseCannotBecomeAnEmployeeChatAnswer()
     {
