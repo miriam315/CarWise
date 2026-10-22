@@ -3,7 +3,7 @@ using System.Text.RegularExpressions;
 using CarWise.Api.AI;
 namespace CarWise.Api.Domain;
 
-public sealed record AdvisorState(string? AwaitingField=null,string? Target=null,bool WantsElectric=false,string[]? CandidateIds=null,string? RequestedCategory=null,string? OfferedReferral=null,string[]? LastOfferedIds=null,string[]? RejectedCandidateIds=null);
+public sealed record AdvisorState(string? AwaitingField=null,string? Target=null,bool WantsElectric=false,string[]? CandidateIds=null,string? RequestedCategory=null,string? OfferedReferral=null,string[]? LastOfferedIds=null,string[]? RejectedCandidateIds=null,AdvisorMemory? Memory=null);
 public static class IntakeFields
 {
     public static readonly string[] All=["salary","commission","bonus","pension","fund","credits","children","currentCar","participation"];

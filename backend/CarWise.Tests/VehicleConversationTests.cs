@@ -54,7 +54,7 @@ public sealed class VehicleConversationTests
     {
         var employee=Data.Employees[0] with{Occupation="מפקח/ת איכות במפעל",CurrentCar="CAR-01"};
         var result=await Chat(Service(new(),new ScriptedToolClient()),employee,"ארצה להשוות את BYD ATTO3");
-        Assert.Contains("אינה בקבוצת הזכאות",result["reply"]!.ToString());Assert.DoesNotContain("הנטו המשוער",result["reply"]!.ToString());
+        Assert.Equal("not_eligible",result["status"]!.ToString());Assert.DoesNotContain("הנטו המשוער",result["reply"]!.ToString());
     }
     [Theory][InlineData("תודה")][InlineData("תודה רבה!")][InlineData("מעולה תודה")]
     public async Task ThanksDoesNotTriggerSearchOrEraseTheConversation(string text)

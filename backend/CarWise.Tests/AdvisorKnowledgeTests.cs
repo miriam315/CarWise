@@ -41,6 +41,24 @@ public sealed class AdvisorKnowledgeTests
         Assert.Contains(fact,result);Assert.DoesNotContain("99999",result);
         Assert.Equal(valid?template.Replace("{FACT_0}",fact):fact,result);
     }
+    [Fact] public async Task ContextualNarrationReceivesTheActualFollowupAndTrustedWorkflowWithoutChangingFinancialFacts()
+    {
+        var completion=new ContextCompletion();
+        var narration=new AiNarrationService(completion,NullLogger<AiNarrationService>.Instance);
+        var fact="ההשתתפות היא 350 ₪ לפי הקטלוג.";
+        var answer=await narration.ComposeAsync(new("ומה לגבי הסכום הזה?",[new{role="assistant",text="דיברנו על הרכב הקודם"}],new{target="CAR-03",pending=(object?)null},[fact]),default);
+        Assert.Equal(fact,answer);
+        Assert.Equal("ומה לגבי הסכום הזה?",completion.Input!["conversation"]!["question"]!.ToString());
+        Assert.Equal("CAR-03",completion.Input["conversation"]!["workflow"]!["target"]!.ToString());
+        Assert.Single(completion.Input["conversation"]!["recentMessages"]!.AsArray());
+        Assert.Equal(fact,completion.Input["facts"]![0]!["meaning"]!.ToString());
+    }
+    private sealed class ContextCompletion:IAiCompletionClient
+    {
+        public JsonNode? Input;
+        public Task<string> CompleteAsync(string name,JsonNode schema,string instructions,string text,CancellationToken ct)
+        {Input=JsonNode.Parse(text);return Task.FromResult("{\"text\":\"{FACT_0}\"}");}
+    }
     [Fact] public async Task AiUnderstandsAQuestionWithoutAKeywordMatchAndUsesOnlyServerFacts()
     {
         using var http=new HttpClient(new FakeHttp(_=>new(HttpStatusCode.OK){Content=new StringContent(JsonDefaults.Serialize(new{choices=new[]{new{finish_reason="stop",message=new{content=JsonDefaults.Serialize(new ExtractedData{QuestionTopics=["group","budget"]})}}}}))})){BaseAddress=new("https://example.invalid/v1/")};

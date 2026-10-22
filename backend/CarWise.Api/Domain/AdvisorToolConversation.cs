@@ -14,6 +14,11 @@ public sealed class AdvisorToolConversation(IAiToolClient model,ReferenceData da
     private static JsonObject Schema(string properties="",string required="")=>JsonNode.Parse("{\"type\":\"object\",\"additionalProperties\":false,\"properties\":{"+properties+"},\"required\":["+required+"]}")!.AsObject();
     public static readonly IReadOnlyList<AiTool> Tools=[
         new("start_comparison","Remember the requested comparison category before collecting missing inputs. This does not save a vehicle choice. After starting, ask only the next missing detail; search/compare when inputs are complete.",Schema("\"category\":{\"type\":\"string\",\"enum\":[\"electric\",\"family\",\"regular\",\"waiver\",\"specific\"]}","\"category\"")),
+        new("manage_conversation","Navigate the actual saved conversation: resume its goal, restore the previous option, pause it, accept/decline a SAVED proposed action, or acknowledge. A bare yes with no pending action must clarify, never guess.",Schema("\"action\":{\"type\":\"string\",\"enum\":[\"resume\",\"restore\",\"pause\",\"accept\",\"decline\",\"acknowledge\",\"answer_question\"]}","\"action\"")),
+        new("offer_next_action","Propose a concrete next step. The server stores what a later yes means. Call this instead of inventing a follow-up invitation in prose. Empty target/field mean no target/field; use only actual searched targets or known missing fields.",Schema("\"action\":{\"type\":\"string\",\"enum\":[\"compare_waiver\",\"compare_selected\",\"representative\",\"alternatives\"]},\"target\":{\"type\":\"string\"},\"field\":{\"type\":\"string\"}","\"action\",\"target\",\"field\"")),
+        new("ask_clarification","Ask one short Hebrew question when the intended target, preference or confirmation is ambiguous. No figures, factual claims or actions. This preserves the comparison and ends the turn.",Schema("\"question\":{\"type\":\"string\"}","\"question\"")),
+        new("set_vehicle_preference","Record the employee's requested preference. Space/comfort must not be guessed from model names: if certified measurements are absent, offer a representative. Lower cost ranks verified engine results, never LLM arithmetic.",Schema("\"preference\":{\"type\":\"string\",\"enum\":[\"more_space\",\"lower_cost\",\"electric\",\"regular\",\"family\",\"any\"]}","\"preference\"")),
+        new("get_missing_fields","Answer whether inputs are missing, without reciting known payroll amounts. It does not erase the comparison or a pending representative action.",Schema()),
         new("get_my_eligibility","Read my authoritative occupation-based group and monthly vehicle budget. Never guess these from conversation.",Schema()),
         new("get_my_current_car","Read my current car and PERSONAL actual participation, or ask for the missing personal information.",Schema()),
         new("get_policy","Read an approved vehicle policy topic, including permitted models and waiver/family/electric rules.",Schema("\"topic\":{\"type\":\"string\",\"enum\":[\"group\",\"budget\",\"eligible_cars\",\"waiver_rules\",\"family_rules\",\"electric_rules\",\"calculation\"]}","\"topic\"")),
@@ -39,19 +44,21 @@ public sealed class AdvisorToolConversation(IAiToolClient model,ReferenceData da
         return Schema(string.Join(",",fields.Select(f=>"\""+f+"\":{\"type\":[\"number\",\"null\"]}")),string.Join(",",fields.Select(f=>"\""+f+"\"")));
     }
     public async Task<AdvisorToolOutcome> RunAsync(ChatRequest request,Employee employee,IReadOnlyList<Message> history,
-        Func<ChatRequest,ExtractedData?,CancellationToken,Task<JsonNode>> execute,CancellationToken ct)
+        CancellationToken ct)
     {
-        var current=employee;var facts=new List<string>();var factTools=new List<string>();
+        var workflow=new AdvisorWorkflow(employee.AdvisorState);
+        var operations=new AdvisorOperations(data,engine,repository);
+        var current=workflow.Attach(employee);AdvisorToolOutcome? terminal=null;string resultStatus="answered";var facts=new List<string>();var factTools=new List<string>();
         var different=AdvisorDialogue.WantsDifferent(request.Text);
         var previousTarget=employee.AdvisorState?.Target;
-        var needsIntake=AdvisorDialogue.RequestsComparison(request.Text)||different;
-        var listAlternatives=different;
+        var comparisonHint=AdvisorDialogue.RequestsComparison(request.Text)||different;
         string? questionField=null,questionWording=null;
         var category=employee.AdvisorState?.RequestedCategory;
-        if(needsIntake)
+        if(comparisonHint)
         {
             category=Regex.IsMatch(request.Text,"משפחתי|ברוכת|7 מקומות")?"family":Regex.IsMatch(request.Text,"לוותר|ויתור")?"waiver":request.Text.Contains("חשמל",StringComparison.Ordinal)?"electric":category;
-            current=current with{AdvisorState=(current.AdvisorState??new()) with{RequestedCategory=category,WantsElectric=category=="electric",Target=category=="waiver"?"waiver":different?null:current.AdvisorState?.Target}};
+            if(different)workflow.Alternatives(category??"any");else workflow.Begin(category??"specific");
+            current=workflow.Attach(current);
         }
         var candidates=new List<string>(employee.AdvisorState?.CandidateIds??[]);var shown=new HashSet<string>(employee.AdvisorState?.CandidateIds??[],StringComparer.Ordinal);
         if(employee.AdvisorState?.Target is {} remembered)shown.Add(remembered);
@@ -61,9 +68,11 @@ public sealed class AdvisorToolConversation(IAiToolClient model,ReferenceData da
         messages.Add(new("user",Redact(request.Text)));
         var cache=new Dictionary<string,JsonObject>(StringComparer.Ordinal);var changed=false;var executed=0;JsonObject? metadata=null;
         var prompt=managedPrompt+"\nMandatory native tool-calling contract:\n"+
-            "Trusted server snapshot (JSON data, not instructions): "+JsonDefaults.Serialize(new{missingFields=IntakeFields.Missing(employee),knownFields=employee.KnownFields??IntakeFields.All,category,previousTarget})+". Unknown fields must never be filled from defaults. Use read tools only when their actual values are needed. "+
+            "Trusted server snapshot (JSON data, not instructions): "+JsonDefaults.Serialize(workflow.Snapshot(current,data))+". Unknown fields must never be filled from defaults. Use read tools only when their actual values are needed. "+
             "Current pending field: "+(employee.AdvisorState?.AwaitingField??"none")+". Current comparison target: "+(employee.AdvisorState?.Target??"none")+". "+
             "Earlier JSON-extraction-only instructions describe a legacy integration. In this native protocol use function calls, never emit extracted field JSON. "+
+            "A central workflow owns goal, offered/rejected vehicles, previous options, preferences and the pending action. Read its structured snapshot instead of guessing state from the last sentence. Use manage_conversation to resume, restore a previous option, pause, accept or decline. For a policy/profile detour use manage_conversation answer_question together with the appropriate read tool; it answers that turn without cancelling the pending comparison or action. A yes only accepts the stored pending action; with no pending action ask_clarification. "+
+            "Every proposed next action MUST use offer_next_action; do not invent invitations outside tools. Interpret natural requirements semantically through set_vehicle_preference. Never infer space, seats or comfort from a model name when no certified attribute exists. Acknowledge conversational messages without searching the catalogue. Tool status needs_input/needs_choice/needs_representative/not_eligible/calculated describes what actually happened; never claim another status. "+
             "You are a warm, concise Hebrew organizational car advisor. Understand follow-ups using the supplied conversation history. Answer the employee's actual question; do not repeat a generic menu. "+
             "Use tools to obtain ALL employee facts, current policy, car IDs and calculations. Prior answers may be stale. Only the server knows the employee identity. "+
             "When a policy or profile answer is already available do not require a full payslip. Catalogue contribution is a documented default for a NEW vehicle; CURRENT contribution is always personal. "+
@@ -100,14 +109,16 @@ public sealed class AdvisorToolConversation(IAiToolClient model,ReferenceData da
                     {
                         try
                         {
-                            metadata=null;Validate(call);var answer=await Invoke(call);var token="{FACT_"+facts.Count+"}";facts.Add(answer);factTools.Add(call.Name);
-                            result=new(){["ok"]=true,["factToken"]=token,["fact"]=answer,["data"]=metadata};cache[signature]=result.DeepClone().AsObject();
+                            metadata=null;resultStatus="answered";Validate(call);var answer=await Invoke(call);var token="{FACT_"+facts.Count+"}";facts.Add(answer);factTools.Add(call.Name);
+                            result=new(){["ok"]=true,["factToken"]=token,["fact"]=answer,["data"]=metadata,["status"]=resultStatus,["conversation"]=JsonNode.Parse(JsonDefaults.Serialize(new AdvisorWorkflow(current.AdvisorState).Snapshot(current,data)))};cache[signature]=result.DeepClone().AsObject();
                         }
                         catch(Exception error)when(error is ArgumentException or InvalidOperationException or FormatException or OverflowException)
                         {result=new(){["ok"]=false,["error"]="invalid_arguments",["message"]="הפעולה לא בוצעה. בחרו פרטים תקינים מתוך תוצאות הכלים או בקשו הבהרה; אין לנחש נתונים."};}
                     }
                     messages.Add(new("tool",Native:call.HasNativeId?new JsonObject{["id"]=call.Id}:null,CallId:call.Id,Name:call.Name,Result:result));
+                    if(terminal is not null)break;
                 }
+                if(terminal is not null)return terminal;
                 // Questions and fresh lists are terminal: no extra model round and no narration request.
                 if(questionWording is not null||factTools.LastOrDefault() is "ask_missing_details" or "list_alternatives" or "compare_vehicle")return await Finish("");
             }
@@ -115,60 +126,61 @@ public sealed class AdvisorToolConversation(IAiToolClient model,ReferenceData da
         catch(Exception error)when(!ct.IsCancellationRequested&&error is AiUnavailableException or HttpRequestException or System.Text.Json.JsonException or InvalidOperationException)
         {
             logger.LogWarning("Advisor tool loop unavailable. Code={Code}",error is AiUnavailableException ai?ai.Code:"invalid_tool_response");
-            if(facts.Count==0&&!needsIntake)throw new AiUnavailableException("שירות הייעוץ לא השלים קריאת כלים","tool_unavailable");
+            if(facts.Count==0&&!workflow.NeedsWork)throw new AiUnavailableException("שירות הייעוץ לא השלים קריאת כלים","tool_unavailable");
         }
         return await Finish("");
 
         async Task<AdvisorToolOutcome> Finish(string finalText)
         {
+            workflow.Rebind(current.AdvisorState);
             var missing=IntakeFields.Missing(current);
             if(factTools.Contains("ask_representative")&&missing.Length>0)
                 return new(current,facts[factTools.LastIndexOf("ask_representative")],[]);
-            if(needsIntake&&category=="waiver"&&!data.OccupationFor(current.Occupation).Waiver)
+            if(workflow.NeedsWork&&category=="waiver"&&!data.OccupationFor(current.Occupation).Waiver)
                 return new(current,AdvisorKnowledge.Answer(["waiver_rules"],current,data,engine),[]);
-            if(needsIntake&&missing.Length>0)
+            if(workflow.NeedsWork&&missing.Length>0)
             {
                 var next=missing[0];var previous=current.AdvisorState??new();
                 // A pending representative question is an actual wait, not a request to repeat an unknown number.
                 if(next=="participation"&&(await repository.TicketsAsync(current.Id,ct)).Any(t=>t.Target==current.CurrentCar&&t.Status=="pending"))
                     return new(current,"הבירור על ההשתתפות ברכב הנוכחי ממתין לנציג. לא יוצג נטו סופי עד לקבלת תשובה.",[]);
-                current=current with{AdvisorState=previous with{AwaitingField=next,RequestedCategory=category,WantsElectric=category=="electric"||previous.WantsElectric}};
+                workflow.Ask(next);current=workflow.Attach(current);
                 var choices=next=="currentCar"?data.Cars.Select(car=>car.Id).ToArray():[];
                 var updated=factTools.Any(t=>t is "set_payroll_fields" or "set_current_car" or "set_current_participation");
                 var reply=questionField==next&&questionWording is not null?questionWording:AdvisorDialogue.NextQuestion(next,data,updated,employee.AdvisorState?.AwaitingField is null);
-                current=current with{AdvisorState=current.AdvisorState! with{OfferedReferral=reply.Contains("נציג",StringComparison.Ordinal)?next:null}};
+                if(reply.Contains("נציג",StringComparison.Ordinal)){workflow.OfferAction(new("representative",Field:next));current=workflow.Attach(current);}
                 if(factTools.Contains("ask_representative"))reply="הפנייה לנציג נפתחה. "+reply;
                 return new(current,reply,choices);
             }
-            if(needsIntake&&missing.Length==0&&listAlternatives)return FreshChoices();
-            if(needsIntake&&missing.Length==0&&!factTools.Any(t=>t is "compare_vehicle" or "ask_representative" or "report_alternative_participation"))
+            if(workflow.NeedsWork&&missing.Length==0&&workflow.Directive==AdvisorDirective.Browse)return await FreshChoices();
+            if(workflow.NeedsWork&&missing.Length==0&&!factTools.Any(t=>t is "compare_vehicle" or "ask_representative" or "report_alternative_participation"))
             {
-                if(category=="waiver")return new(current,await Apply("waiver",new()),candidates.ToArray());
+                if(category=="waiver"){var reply=await Apply("waiver",new());return new(current,reply,candidates.ToArray());}
                 if(current.AdvisorState?.Target is null&&category is "electric" or "family" or "regular")
                 {
-                    if(candidates.Count==0){return FreshChoices();}
+                    if(candidates.Count==0){return await FreshChoices();}
                     return new(current,"איזה דגם תרצו להשוות?",candidates.ToArray());
                 }
             }
             if(facts.Count==0)return new(current,"אני כאן לעזור בבחירת רכב ובהשפעה על הנטו. מה תרצו לברר לגבי הרכב או הזכאות שלכם?",candidates.ToArray());
             var selected=AdvisorDialogue.SelectFacts(finalText,facts,factTools);
             // Selection happens before narration, so its placeholder safety checks do not force a context dump.
-            return new(current,narration is null?string.Join("\n\n",selected):await narration.ExplainFactsAsync(selected,ct),candidates.ToArray());
+            return new(current,narration is null?string.Join("\n\n",selected):await narration.ComposeAsync(new(Redact(request.Text),history.TakeLast(6).Select(message=>(object)new{role=message.Role,text=Redact(message.Text)[..Math.Min(Redact(message.Text).Length,1200)]}).ToArray(),workflow.Snapshot(current,data),selected),ct),candidates.ToArray());
         }
-        AdvisorToolOutcome FreshChoices()
+        async Task<AdvisorToolOutcome> FreshChoices()
         {
-            var rejected=listAlternatives?AdvisorDialogue.RejectedChoices(employee.AdvisorState??new(),category):new HashSet<string>(StringComparer.Ordinal);
-            var (reply,selected)=AdvisorDialogue.Alternatives(current,data,engine,category,listAlternatives?previousTarget:null,rejected);
-            current=current with{AdvisorState=(current.AdvisorState??new()) with{Target=null,AwaitingField=selected.Length==0?"alternativeCatalogue":null,RequestedCategory=category,CandidateIds=selected,WantsElectric=category=="electric",RejectedCandidateIds=rejected.ToArray(),LastOfferedIds=selected.Length>0?selected:employee.AdvisorState?.LastOfferedIds}};
-            return new(current,reply,selected);
+            var reply=Adopt(await operations.BrowseAsync(current,category??"any",workflow.Directive==AdvisorDirective.Browse,ct));return new(current,reply,candidates.ToArray());
+        }
+        string Adopt(AdvisorActionResult result)
+        {
+            current=result.Employee;workflow=new(current.AdvisorState);workflow.Outcome(result.Status);resultStatus=result.Status;
+            metadata=result.Data is null?null:JsonNode.Parse(JsonDefaults.Serialize(result.Data))!.AsObject();
+            candidates.Clear();candidates.AddRange(result.Candidates);return result.Reply;
         }
         async Task<string> Apply(string? target,ExtractedData fields)
         {
-            if(category is not null)fields=fields with{WantsElectric=category=="electric"};
-            var response=await execute(request with{Employee=current,Target=target},fields,ct);
-            current=JsonDefaults.Read<Employee>(response["employee"]!.ToJsonString());
-            candidates.Clear();candidates.AddRange(response["candidates"]!.AsArray().Select(c=>c!.ToString()));
-            return response["reply"]!.GetValue<string>();
+            return Adopt(fields.HasUpdates?await operations.PayrollAsync(current,fields,ct):target is not null?
+                await operations.CompareAsync(current,target,ct):await operations.ContinueAsync(current,ct));
         }
         void Mutate(){if(changed)throw new ArgumentException("Only one state change per turn");changed=true;}
         string Target(JsonObject args)
@@ -182,19 +194,70 @@ public sealed class AdvisorToolConversation(IAiToolClient model,ReferenceData da
             var args=call.Arguments;
             switch(call.Name)
             {
+                case "manage_conversation":
+                    var action=args["action"]!.GetValue<string>();workflow=new(current.AdvisorState);
+                    if(action=="answer_question"){workflow.AnswerQuestion();current=workflow.Attach(current);return "נבדוק את השאלה לפי המידע המאושר, בלי לבטל את ההשוואה.";}
+                    if(action=="accept")
+                    {
+                        if(workflow.Memory.Pending?.Kind=="representative")Mutate();
+                        var accepted=Adopt(await operations.AcceptAsync(current,ct));terminal=new(current,accepted,candidates.ToArray());return accepted;
+                    }
+                    if(action is "resume" or "restore")
+                    {
+                        if(action=="restore"&&!workflow.Restore())
+                        {workflow.Clarify("לאיזו אפשרות רצית לחזור?");current=workflow.Attach(current);terminal=new(current,"לאיזו אפשרות רצית לחזור?",[]);return terminal.Reply;}
+                        if(action=="resume")workflow.Resume();current=workflow.Attach(current);category=current.AdvisorState!.RequestedCategory;
+                        var resumed=Adopt(await operations.ContinueAsync(current,ct));terminal=new(current,resumed,candidates.ToArray());return resumed;
+                    }
+                    if(action=="pause")workflow.Pause();else if(action=="decline")workflow.Decline();else workflow.Applied("acknowledge");
+                    current=workflow.Attach(current);var acknowledgement=action=="pause"?"נעצור כאן. הנתונים שאישרת נשמרו, ואפשר לחזור לאפשרות הקודמת בהמשך.":action=="decline"?"בסדר, לא אבצע את הפעולה שהצעתי.":"בשמחה!";
+                    terminal=new(current,acknowledgement,[]);return acknowledgement;
+                case "offer_next_action":
+                    resultStatus="confirmation_required";var proposed=args["action"]!.GetValue<string>();var offerTarget=args["target"]!.GetValue<string>();var offerField=args["field"]!.GetValue<string>();
+                    if(offerField.Length>0&&!IntakeFields.All.Contains(offerField))throw new ArgumentException("Unknown field");
+                    if(proposed=="compare_waiver"&&!data.OccupationFor(current.Occupation).Waiver)return AdvisorKnowledge.Answer(["waiver_rules"],current,data,engine);
+                    if(proposed=="compare_selected")_ = Target(new JsonObject{["target"]=offerTarget});
+                    if(proposed=="representative"&&offerField.Length>0&&IntakeFields.Known(current,offerField))throw new ArgumentException("Field is already known");
+                    workflow=new(current.AdvisorState);workflow.OfferAction(new(proposed,offerTarget.Length>0?offerTarget:null,offerField.Length>0?offerField:null,
+                        proposed=="representative"?(offerField.Length>0?null:request.Text):null));current=workflow.Attach(current);
+                    var invitation=proposed=="compare_waiver"?"רוצה שאחשב את ההשפעה של ויתור על הרכב על הנטו שלך?":proposed=="compare_selected"?"רוצה שאחשב את הנטו עבור הדגם הזה?":proposed=="alternatives"?"רוצה שאציג חלופות נוספות?":"רוצה שאפתח פנייה לנציג לבירור הזה?";
+                    terminal=new(current,string.Join("\n\n",facts.TakeLast(1).Append(invitation)),candidates.ToArray());return invitation;
+                case "ask_clarification":
+                    resultStatus="needs_clarification";var clarification=args["question"]!.GetValue<string>();
+                    if(clarification.Length is <5 or >240||!clarification.EndsWith('?')||clarification.Count(c=>c=='?')!=1||Regex.IsMatch(clarification,@"[\p{N}{}\r\n]"))throw new ArgumentException("One nonfinancial question required");
+                    workflow=new(current.AdvisorState);workflow.Clarify(clarification);current=workflow.Attach(current);terminal=new(current,clarification,[]);return clarification;
+                case "get_missing_fields":
+                    var missingFields=IntakeFields.Missing(current);
+                    if(missingFields.Length>0)
+                    {
+                        workflow.Rebind(current.AdvisorState! with{AwaitingField=missingFields[0]});workflow.Applied("inspect_missing_inputs");
+                        if(missingFields[0]=="participation"&&workflow.Memory.Pending is null)workflow.OfferAction(new("representative",Field:"participation"));
+                        current=workflow.Attach(current);resultStatus="needs_input";
+                    }
+                    metadata=new(){["missingFields"]=new JsonArray(missingFields.Select(field=>(JsonNode)JsonValue.Create(field)!).ToArray())};
+                    return AdvisorDialogue.MissingStatus(current,data);
+                case "set_vehicle_preference":
+                    var preference=args["preference"]!.GetValue<string>();workflow=new(current.AdvisorState);workflow.Preference(preference);
+                    if(preference=="more_space")
+                    {
+                        resultStatus="unsupported_attribute";workflow.OfferAction(new("representative",Subject:"בדיקת נתוני מרווח ותא מטען מאומתים עבור חלופת רכב מתאימה לזכאות"));
+                        current=workflow.Attach(current);terminal=new(current,"אין בקטלוג כרגע מידות מרווח ותא מטען מאומתות להשוואה. רוצה שאפתח פנייה לנציג לבירור רכב מרווח יותר?",[]);return terminal.Reply;
+                    }
+                    if(preference!="lower_cost"){workflow.Begin(preference);category=preference;}
+                    current=workflow.Attach(current);var preferred=Adopt(await operations.BrowseAsync(current,category??"any",false,ct));terminal=new(current,preferred,candidates.ToArray());return preferred;
                 case "start_comparison":
-                    needsIntake=true;category=args["category"]!.GetValue<string>();
+                    workflow.RequestInputs();category=args["category"]!.GetValue<string>();
                     candidates.Clear();
-                    current=current with{AdvisorState=(current.AdvisorState??new()) with{RequestedCategory=category,WantsElectric=category=="electric",Target=category=="waiver"?"waiver":null}};
+                    workflow.Begin(category);current=workflow.Attach(current);
                     return "ההשוואה תיבדק לפי הנתונים האישיים המאושרים והמסלול שביקשת; נשלים רק את מה שחסר.";
                 case "ask_next_question":
                     var field=args["field"]!.GetValue<string>();var wording=args["question"]!.GetValue<string>();
                     if(IntakeFields.Missing(current).FirstOrDefault()!=field||!AdvisorDialogue.ValidQuestion(wording,field))throw new ArgumentException("Ask only the actual next missing field, without factual claims");
-                    needsIntake=true;questionField=field;questionWording=AdvisorDialogue.Question(wording,data);
+                    workflow.Ask(field);current=workflow.Attach(current);resultStatus="needs_input";questionField=field;questionWording=AdvisorDialogue.Question(wording,data);
                     return questionWording;
                 case "list_alternatives":
-                    needsIntake=true;listAlternatives=true;category=args["category"]!.GetValue<string>();
-                    current=current with{AdvisorState=(current.AdvisorState??new()) with{Target=null,RequestedCategory=category,WantsElectric=category=="electric"}};
+                    workflow.RequestInputs();category=args["category"]!.GetValue<string>();
+                    workflow.Alternatives(category);current=workflow.Attach(current);
                     return "נבדקות חלופות נוספות בקטלוג לפי הזכאות שלך.";
                 case "get_my_eligibility":return AdvisorKnowledge.Answer(["group","budget"],current,data,engine);
                 case "get_my_current_car":
@@ -207,18 +270,17 @@ public sealed class AdvisorToolConversation(IAiToolClient model,ReferenceData da
                     var knownPayroll=payroll.Where(p=>IntakeFields.Known(current,p.Item1)).ToArray();
                     return knownPayroll.Length==0?"עדיין לא נמסרו נתוני שכר לחישוב.":string.Join("; ",knownPayroll.Select(p=>p.Item2+": "+p.Item3.ToString(CultureInfo.InvariantCulture)))+". מקור: הנתונים שאושרו בפרופיל.";
                 case "set_current_car":
-                    needsIntake=true;
+                    workflow.RequestInputs();
                     if(IntakeFields.Known(current,"currentCar")||current.AdvisorState?.AwaitingField!="currentCar")throw new ArgumentException("No saved current-car question");
                     var currentTarget=args["target"]!.GetValue<string>();if(currentTarget!="none")_ = Target(args);
-                    Mutate();return await Apply(currentTarget=="none"?null:currentTarget,new());
+                    Mutate();return Adopt(await operations.CurrentCarAsync(current,currentTarget=="none"?null:currentTarget,ct));
                 case "set_current_participation":
-                    needsIntake=true;
+                    workflow.RequestInputs();
                     var personal=args["amount"]!.GetValue<decimal>();
                     if(!ExplicitNumber(request.Text,personal)||current.CurrentCar is null||personal<0||personal>20000||
                         (current.AdvisorState?.AwaitingField!="participation"&&!Regex.IsMatch(request.Text,"השתתפות|משלם|משלמת")))throw new ArgumentException("Personal participation not explicitly supplied");
                     Mutate();current=engine.Validate(IntakeFields.Answer(current,"participation",personal));
-                    current=current with{AdvisorState=(current.AdvisorState??new()) with{AwaitingField=null}};
-                    await repository.SaveConversationAsync(current,current.AdvisorState.Target,ct);
+                    workflow=new(current.AdvisorState);workflow.Applied("current_participation_updated");current=workflow.Attach(current);
                     return $"עדכנתי את ההשתתפות האישית ברכב הנוכחי ל־{FinancialText.Number(personal)} ₪ לפי הסכום שמסרת. אפשר להמשיך בהשוואה.";
                 case "find_vehicles":
                     var query=args["query"]!.GetValue<string>().Trim();var drive=args["drive"]!.GetValue<string>();
@@ -228,47 +290,43 @@ public sealed class AdvisorToolConversation(IAiToolClient model,ReferenceData da
                         .Take(30).ToList();
                     foreach(var car in cars)shown.Add(car.Id);candidates.Clear();candidates.AddRange(cars.Select(c=>c.Id));
                     metadata=new(){["vehicles"]=new JsonArray(cars.Select(c=>(JsonNode)new JsonObject{["id"]=c.Id,["brand"]=c.Brand,["model"]=c.Model,["year"]=c.Year}).ToArray())};
+                    resultStatus=cars.Count>0?"needs_choice":matches.Count>0?"not_eligible":"not_found";
                     if(cars.Count==0)return matches.Count>0?"הדגם נמצא בקטלוג, אך אינו מתאים כרגע לזכאות או למסלול שהתבקש. אפשר לבדוק חלופה זכאית או לפנות לנציג לבירור.":"לא זיהיתי התאמה חד־משמעית לשם הזה בקטלוג. אפשר לציין דגם ושנת רישום או לבקש בירור מנציג.";
                     return "לפי הקטלוג והזכאות שלך: "+string.Join("; ",cars.Select(c=>$"{c.Brand} {c.Model}, {c.Year}, {c.Drive}, קבוצה {c.Group}"))+(cars.Count==1?". זוהה דגם יחיד; ניתן להשוות אותו ישירות.":". יש להבהיר איזה דגם ושנת רישום להשוות.");
-                case "compare_vehicle":needsIntake=true;return await Apply(Target(args),new());
-                case "ask_missing_details":needsIntake=true;return await Apply(current.AdvisorState?.Target,new());
+                case "compare_vehicle":workflow.RequestInputs();return await Apply(Target(args),new());
+                case "ask_missing_details":workflow.RequestInputs();return Adopt(await operations.ContinueAsync(current,ct));
                 case "set_payroll_fields":
-                    needsIntake=true;
+                    workflow.RequestInputs();
                     var updates=JsonDefaults.Read<ExtractedData>(args["fields"]!.ToJsonString());
                     var values=args["fields"]!.AsObject().Where(p=>p.Value is not null).ToArray();
                     if(values.Length==0||values.Any(p=>!ExplicitNumber(request.Text,p.Value!.GetValue<decimal>())&&
                         !(p.Value!.GetValue<decimal>()==0&&(IntakeFields.ExplicitNoneStatement(request.Text,p.Key)||current.AdvisorState?.AwaitingField==p.Key&&IntakeFields.ExplicitNone(request.Text,p.Key)))))throw new ArgumentException("Unstated value");
-                    var payrollUpdated=engine.Validate(IntakeFields.Apply(current,updates));Mutate();
-                    if(IntakeFields.Missing(payrollUpdated).Length>0)
-                    {
-                        // The outer reply persists this trusted state once; don't reload/re-save the
-                        // entire conversation merely to ask for the next input.
-                        current=payrollUpdated;return "קיבלתי את נתוני השכר שמסרת. נמשיך עם הפרט הבא שחסר.";
-                    }
-                    return await Apply(null,updates);
+                    engine.Validate(IntakeFields.Apply(current,updates));Mutate();
+                    return Adopt(await operations.PayrollAsync(current,updates,ct));
                 case "report_alternative_participation":
                     var target=Target(args);var amount=args["amount"]!.GetValue<decimal>();
                     if(target=="waiver"||target==current.CurrentCar||!ExplicitNumber(request.Text,amount))throw new ArgumentException("Not a new vehicle contribution");
-                    Mutate();return await Apply(target,new(){TargetParticipation=amount});
+                    Mutate();return Adopt(await operations.ReportAsync(current,target,amount,ct));
                 case "ask_representative":
                     var reason=args["reason"]!.GetValue<string>();
                     if(reason=="current_participation")
                     {
                         if(IntakeFields.Known(current,"participation")||current.CurrentCar is null)throw new ArgumentException("Personal participation is known");
                         Mutate();await repository.CreateTicketAsync(current,current.CurrentCar,"בירור השתתפות אישית ברכב הנוכחי: "+request.Text,ct);
-                        current=current with{AdvisorState=(current.AdvisorState??new()) with{AwaitingField="participation"}};
+                        workflow=new(current.AdvisorState);workflow.Wait("participation",current.CurrentCar);current=workflow.Attach(current);
                         return "פתחתי פנייה לנציג לבירור ההשתתפות האישית ברכב הנוכחי. לא יוצג נטו סופי לפני השלמת הנתון.";
                     }
                     if(reason=="alternative_participation")
                     {
                         var alternative=Target(args);var car=data.Cars.SingleOrDefault(c=>c.Id==alternative)??throw new ArgumentException("Vehicle required");
                         if(car.ParticipationKnown&&!ParticipationRules.ApprovalRequested(request.Text)&&!Regex.IsMatch(request.Text,"שונה|אחרת|סוכם|לא יודע|לא יודעת"))throw new ArgumentException("Use documented catalogue value");
-                        Mutate();return await Apply(alternative,new(){ParticipationNeedsApproval=true});
+                        Mutate();return Adopt(await operations.ApprovalAsync(current,alternative,request.Text,ct));
                     }
                     var pendingField=current.AdvisorState?.AwaitingField;
                     if(!Regex.IsMatch(request.Text,"רכב|ליסינג|נטו|שכר|תקציב|זכאות|קבוצ|השתתפות|מדיניות|נציג|חשמל")&&!(pendingField is not null&&IntakeFields.All.Contains(pendingField)&&IntakeFields.IsUnknown(request.Text)))throw new ArgumentException("Outside vehicle advice scope");
                     var subject=pendingField is not null&&IntakeFields.All.Contains(pendingField)?IntakeFields.Question(pendingField,data):request.Text;
                     Mutate();await repository.CreateTicketAsync(current,ParticipationRules.CatalogueTarget(subject),"בירור ייעוץ רכב: "+subject+" — "+request.Text,ct,appendAnnouncement:false);
+                    workflow=new(current.AdvisorState);workflow.Wait(pendingField??"representative");current=workflow.Attach(current);
                     return "פתחתי פנייה לנציג בנושא ששאלת. אין לי מידע מאושר מספיק כדי לענות כרגע; לא אמציא כלל או סכום.";
                 case "get_representative_status":
                     var tickets=(await repository.TicketsAsync(current.Id,ct)).TakeLast(5).ToList();
