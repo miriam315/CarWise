@@ -1,0 +1,89 @@
+{
+  "date": "2026-10-22",
+  "reportedGithubRun": 39767751559,
+  "regressionBeforeFix": {
+    "passed": false,
+    "error": "TypeError: Cannot read properties of null (reading 'postMessage')",
+    "stackOperation": "Tesseract recognize after deferred canvas encoding completed following cancellation",
+    "baseCommit": "0ee8e15"
+  },
+  "regressionAfterFix": {
+    "passed": true,
+    "browserErrors": [],
+    "documentUploads": 0,
+    "cancelledWithoutServerFallback": true,
+    "browserFiles": [
+      {
+        "file": "01-complex-monthly.pdf",
+        "seconds": 0.246,
+        "values": {
+          "salary": "19000.25",
+          "commission": "1000",
+          "bonus": "0",
+          "pension": "6",
+          "fund": "2.5",
+          "credits": "2.25",
+          "participation": "350"
+        },
+        "missing": [],
+        "wrong": {}
+      },
+      {
+        "file": "01-complex-monthly.png",
+        "seconds": 6.862,
+        "values": {
+          "salary": "19000.25",
+          "commission": "1000",
+          "bonus": "0",
+          "pension": "6",
+          "fund": "2.5",
+          "credits": "2.25",
+          "participation": "350"
+        },
+        "missing": [],
+        "wrong": {}
+      }
+    ]
+  },
+  "nodeTests": {
+    "passed": 12,
+    "newCancellationCases": 6
+  },
+  "serverTests": {
+    "passed": 299,
+    "failed": 0,
+    "skipped": 3,
+    "skipReason": "Separate Docker OCR integration tests; server OCR is unchanged."
+  },
+  "buildPassed": true,
+  "exactCiCommand": "npm run test:e2e -- --quick",
+  "e2eSuites": [
+    {
+      "suite": "fleet",
+      "passed": true,
+      "seconds": 10.14
+    },
+    {
+      "suite": "intent",
+      "passed": true,
+      "seconds": 10.43
+    },
+    {
+      "suite": "innovations",
+      "passed": true,
+      "seconds": 33.74
+    },
+    {
+      "suite": "car-media",
+      "passed": true,
+      "seconds": 10.02
+    },
+    {
+      "suite": "judge-demo",
+      "passed": true,
+      "seconds": 9.45
+    }
+  ],
+  "githubRerunVerified": false,
+  "githubNote": "GitHub Actions logs are inaccessible to this environment; local reproduction and regression verified. The new push triggers a fresh workflow run."
+}

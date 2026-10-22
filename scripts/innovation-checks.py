@@ -20,7 +20,7 @@ def check(page,query,nav,screenshots,all_browser_files=True):
  def on_request(request):
   if request.method=='POST' and '/payslip/extract' in request.url:posts.append(request.url)
   if request.url.startswith('http') and not request.url.startswith(page.url.split('/')[0]+'//'+page.url.split('/')[2]):external.append(request.url)
- def on_error(error):browser_errors.append(str(error))
+ def on_error(error):browser_errors.append(error.stack or str(error))
  page.on('request',on_request);page.on('pageerror',on_error)
  evidence={'browserFiles':[],'conditionalBoundary':None,'externalRequests':[],'documentUploads':0,'passed':False}
  try:
@@ -94,13 +94,27 @@ def check(page,query,nav,screenshots,all_browser_files=True):
     expect(page.locator('.payslip-highlight.value')).to_have_count(1)
     assert page.locator('.payslip-highlight.value').evaluate('(e)=>e.getBoundingClientRect().width>0')
     if suffix=='.png':page.screenshot(path=str(screenshots/'browser-ocr-source.png'),full_page=True)
-   # Cancel a real WASM operation; it must not fall through to server extraction.
+   # Reproduce cancellation during async canvas encoding deterministically. In
+   # Tesseract 6 recognize(canvas) can otherwise post to a terminated worker
+   # after its internal toBlob/FileReader preparation finishes.
+   page.evaluate("""() => {
+    const original=HTMLCanvasElement.prototype.toBlob;
+    window.carwiseEncodingReached=false;window.carwiseReleaseEncoding=null;
+    HTMLCanvasElement.prototype.toBlob=function(callback,...args){
+     original.call(this,blob=>{window.carwiseEncodingReached=true;
+      window.carwiseReleaseEncoding=()=>callback(blob);},...args);
+    };
+    window.carwiseRestoreEncoding=()=>{HTMLCanvasElement.prototype.toBlob=original};
+   }""")
    picture=next(n for n in archive.namelist() if n.endswith('01-complex-monthly.png'))
    page.get_by_label('העלאת תלוש שכר').set_input_files({'name':'cancel-synthetic.png','mimeType':'image/png','buffer':archive.read(picture)})
    page.locator('.payslip-consent input').check();page.get_by_role('button',name='חילוץ נתונים מהתלוש',exact=True).click()
-   page.wait_for_timeout(1500);page.get_by_role('button',name='ביטול חילוץ',exact=True).click()
+   page.wait_for_function('window.carwiseEncodingReached===true',timeout=60000)
+   page.get_by_role('button',name='ביטול חילוץ',exact=True).click()
    expect(page.locator('.payslip-panel [role=alert]')).to_contain_text('החילוץ בוטל')
-   expect(page.locator('.payslip-review')).to_have_count(0);page.wait_for_timeout(500)
+   expect(page.locator('.payslip-review')).to_have_count(0)
+   page.evaluate('window.carwiseReleaseEncoding();window.carwiseRestoreEncoding()')
+   page.wait_for_timeout(500)
    evidence['cancelledWithoutServerFallback']=True
    # Two actual uploads selected together, reviewed separately. Neither file is posted.
    names=[n for n in archive.namelist() if n.endswith(('01-complex-monthly.pdf','02-complex-sales.pdf')) and '-scanned' not in n]
@@ -151,6 +165,7 @@ def check(page,query,nav,screenshots,all_browser_files=True):
   evidence['externalRequests']=external;evidence['documentUploads']=len(posts);evidence['passed']=True
   (screenshots.parent/'innovation-verification.json').write_text(json.dumps(evidence,ensure_ascii=False,indent=2)+'\n')
  finally:
+  evidence['browserErrors']=browser_errors
   (screenshots.parent/'innovation-verification.json').write_text(json.dumps(evidence,ensure_ascii=False,indent=2)+'\n')
   page.remove_listener('request',on_request);page.remove_listener('pageerror',on_error)
   page.set_viewport_size({'width':1440,'height':1100})

@@ -1,28 +1,30 @@
 import {createWorker,PSM,type Worker} from 'tesseract.js';
 import {getDocument,GlobalWorkerOptions,Util,type PDFDocumentProxy} from 'pdfjs-dist';
 import {extractLayout,mergeReads,parseTsv,repairHebrewLabels,type PayrollRead,type Word} from './payrollLayout';
+import {prepareOcrImage} from './browserOcrImage';
 GlobalWorkerOptions.workerSrc=new URL('pdfjs-dist/build/pdf.worker.min.mjs',import.meta.url).href;
 export type OcrOptions={languages:string;minimumConfidence:number;maxPages:number;timeoutSeconds:number};
 export async function extractInBrowser(file:File,options:OcrOptions,signal:AbortSignal,progress:(s:string)=>void):Promise<PayrollRead>{
  let worker:Worker|undefined,pdf:PDFDocumentProxy|undefined,creation:Promise<Worker>|undefined;let expired=false;
- const controller=new AbortController();const abort=()=>{expired=true;controller.abort();void worker?.terminate();void pdf?.loadingTask.destroy()};signal.addEventListener('abort',abort,{once:true});
+ const controller=new AbortController();const abort=()=>{expired=true;controller.abort();const active=worker;if(active)void Promise.resolve().then(()=>active.terminate()).catch(()=>{});void pdf?.loadingTask.destroy().catch(()=>{})};signal.addEventListener('abort',abort,{once:true});
  const timer=window.setTimeout(abort,Math.min(120,Math.max(10,options.timeoutSeconds))*1000);
  const check=()=>{if(signal.aborted||expired)throw Error(signal.aborted?'החילוץ בוטל.':'החילוץ בדפדפן לא הושלם בזמן. אפשר לנסות קובץ קטן יותר או לבחור במפורש חילוץ מבודד בשרת.')};
  function bounded<T>(task:Promise<T>):Promise<T>{
-  check();return new Promise<T>((resolve,reject)=>{const stop=()=>reject(Error(signal.aborted?'החילוץ בוטל.':'החילוץ בדפדפן חרג מהזמן שהוגדר. לא בוצעה העלאה לשרת.'));controller.signal.addEventListener('abort',stop,{once:true});task.then(resolve,reject).finally(()=>controller.signal.removeEventListener('abort',stop))});
+  return new Promise<T>((resolve,reject)=>{const stop=()=>reject(Error(signal.aborted?'החילוץ בוטל.':'החילוץ בדפדפן חרג מהזמן שהוגדר. לא בוצעה העלאה לשרת.'));controller.signal.addEventListener('abort',stop,{once:true});task.then(resolve,reject).finally(()=>controller.signal.removeEventListener('abort',stop));if(controller.signal.aborted)stop()});
  }
  const reads:PayrollRead[]=[];const language=options.languages==='eng'?'eng':'heb+eng';
  async function recognize(canvas:HTMLCanvasElement,page:number){
+  check();const image=await bounded(prepareOcrImage(canvas,controller.signal));check();
   check();if(!worker){progress('טוענים מנוע מקומי וקובצי שפה מהאתר…');creation=createWorker(language,1,{workerPath:new URL('/ocr/runtime/worker.min.js',location.origin).href,corePath:new URL('/ocr/runtime',location.origin).href,langPath:new URL('/ocr/models',location.origin).href,workerBlobURL:false,gzip:true,cacheMethod:'none',logger:m=>{if(!expired&&m.status==='recognizing text')progress('קריאה במכשיר בלבד · '+Math.round(m.progress*100)+'%')},errorHandler:()=>{}});worker=await bounded(creation);check()}
   const passes:PayrollRead[]=[],recognized:Word[][]=[];
   for(const [mode,adaptive] of [[PSM.AUTO,false],[PSM.SINGLE_BLOCK,false],[PSM.SPARSE_TEXT,false],[PSM.SPARSE_TEXT,true]] as const){
    check();await bounded(worker.setParameters({tessedit_pageseg_mode:mode,thresholding_method:adaptive?'2':'0'}));check();
-   const {data}=await bounded(worker.recognize(canvas,{}, {text:false,tsv:true}));check();const words=parseTsv(data.tsv||'',page).map(w=>({...w,pageWidth:canvas.width,pageHeight:canvas.height}));recognized.push(words);passes.push(extractLayout(words,options.minimumConfidence,'browser-ocr',controller.signal));
+   const {data}=await bounded(worker.recognize(image,{}, {text:false,tsv:true}));check();const words=parseTsv(data.tsv||'',page).map(w=>({...w,pageWidth:canvas.width,pageHeight:canvas.height}));recognized.push(words);passes.push(extractLayout(words,options.minimumConfidence,'browser-ocr',controller.signal));
    if(Object.values(mergeReads(passes,'browser-ocr').fields).every(f=>f.value!=null))break;
   }
   if(language.includes('heb')&&Object.values(mergeReads(passes,'browser-ocr').fields).some(f=>f.value==null)){
-   check();await bounded(worker.reinitialize('heb',1));await bounded(worker.setParameters({tessedit_pageseg_mode:PSM.SINGLE_BLOCK,thresholding_method:'0'}));
-   const {data}=await bounded(worker.recognize(canvas,{}, {text:false,tsv:true}));check();const labels=parseTsv(data.tsv||'',page).map(w=>({...w,pageWidth:canvas.width,pageHeight:canvas.height}));
+   check();await bounded(worker.reinitialize('heb',1));check();await bounded(worker.setParameters({tessedit_pageseg_mode:PSM.SINGLE_BLOCK,thresholding_method:'0'}));check();
+   const {data}=await bounded(worker.recognize(image,{}, {text:false,tsv:true}));check();const labels=parseTsv(data.tsv||'',page).map(w=>({...w,pageWidth:canvas.width,pageHeight:canvas.height}));
    for(const words of recognized)passes.push(extractLayout(repairHebrewLabels(words,labels,options.minimumConfidence),options.minimumConfidence,'browser-ocr',controller.signal));
    await bounded(worker.reinitialize(language,1));check();
   }

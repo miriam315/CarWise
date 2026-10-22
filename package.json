@@ -8,7 +8,7 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 0.0.0.0",
     "server": "node scripts/dotnet.mjs run --project backend/CarWise.Api --no-launch-profile",
-    "test": "node --test scripts/check-cloud-tests.mjs && node scripts/browser-payroll-tests.mjs && node scripts/dotnet.mjs test backend/CarWise.Tests --nologo",
+    "test": "node --test scripts/check-cloud-tests.mjs scripts/browser-ocr-cancel-tests.mjs && node scripts/browser-payroll-tests.mjs && node scripts/dotnet.mjs test backend/CarWise.Tests --nologo",
     "start": "npm run server",
     "server:build": "node scripts/dotnet.mjs build backend/CarWise.Api --nologo",
     "db:start": "node scripts/dev-db.mjs",
