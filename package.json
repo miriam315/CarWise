@@ -22,7 +22,9 @@
     "test:browser-payroll": "node scripts/browser-payroll-tests.mjs",
     "verify:innovations": "python3 scripts/verify-innovations.py",
     "verify:fleet": "python3 scripts/verify-fleet.py",
-    "verify:intent": "python3 scripts/verify-intent.py"
+    "verify:intent": "python3 scripts/verify-intent.py",
+    "test:e2e": "python3 scripts/test-e2e.py",
+    "test:all": "npm test && npm run build && npm run test:e2e"
   },
   "dependencies": {
     "@fontsource/heebo": "^5.3.0",

@@ -1,0 +1,41 @@
+{
+  "date": "2026-10-22",
+  "unitAndBrowserParser": {
+    "serverPassed": 273,
+    "serverSkipped": 3,
+    "serverFailed": 0,
+    "newAccountLifecycleCases": 16,
+    "browserPayrollParserPassed": true
+  },
+  "isolatedOcr": {
+    "passed": 14,
+    "skipped": 0,
+    "failed": 0,
+    "documents": 12,
+    "expectedFields": 84,
+    "complexPayslipsPassed": true
+  },
+  "realBrowserAndPostgres": [
+    {
+      "suite": "fleet",
+      "passed": true,
+      "seconds": 11.25
+    },
+    {
+      "suite": "intent",
+      "passed": true,
+      "seconds": 11.1
+    },
+    {
+      "suite": "innovations",
+      "passed": true,
+      "seconds": 37.04
+    }
+  ],
+  "buildPassed": true,
+  "limits": [
+    "AI and Supabase Auth providers use controlled responses; no hosted production credentials were used.",
+    "Browser OCR acceptance used quick mode (2 initial documents), followed by multi-month PDF review and cancellation.",
+    "GitHub Actions workflow is configured; this report records local runs, not a completed GitHub Actions run."
+  ]
+}

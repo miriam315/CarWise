@@ -1,0 +1,85 @@
+name: Automated tests
+on:
+  push:
+    branches: [main, work]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  application:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm ci
+      - run: npm test -- --logger trx
+      - run: npm run build
+      - run: python -m pip install -r scripts/requirements-test.txt
+      - run: python -m playwright install --with-deps chromium
+      - name: Start disposable PostgreSQL for browser tests
+        run: docker run -d --name carwise-postgres -e POSTGRES_USER=carwise -e POSTGRES_PASSWORD=ci-test-only -e POSTGRES_DB=carwise -p 55432:5432 --health-cmd="pg_isready -U carwise" --health-interval=2s --health-retries=30 postgres:16
+      - name: Wait for PostgreSQL
+        run: |
+          for attempt in {1..60}; do
+            if docker exec carwise-postgres pg_isready -U carwise; then exit 0; fi
+            sleep 1
+          done
+          exit 1
+      - name: Real API and browser tests (fleet, privacy, payroll decision features)
+        run: npm run test:e2e -- --quick
+        env:
+          CARWISE_TEST_CONNECTION: Host=127.0.0.1;Port=55432;Database=carwise;Username=carwise;Password=ci-test-only
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: application-test-results
+          include-hidden-files: true
+          path: |
+            backend/CarWise.Tests/TestResults/
+            .local/test-results/
+            .local/innovation-verification.json
+          retention-days: 7
+
+  isolated-ocr:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - run: npm run ocr:setup
+      - name: Isolation and all twelve dense synthetic payslips
+        run: node scripts/dotnet.mjs test backend/CarWise.Tests --nologo --filter 'FullyQualifiedName~OcrSandbox|FullyQualifiedName~ComplexPayrollIntegration' --logger trx
+        env:
+          CARWISE_VERIFY_OCR: 'true'
+          CARWISE_VERIFY_COMPLEX_OCR: 'true'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ocr-test-results
+          include-hidden-files: true
+          path: |
+            backend/CarWise.Tests/TestResults/
+            .local/complex-ocr-verification.json
+          retention-days: 7
