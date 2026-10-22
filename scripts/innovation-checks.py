@@ -4,15 +4,15 @@ from pathlib import Path
 from zipfile import ZipFile
 import json,time,urllib.error
 from playwright.sync_api import expect
+from redacted_payslip_fixture import configure,prepare,extract,mock
 
 LABELS={'salary':'שכר בסיס חודשי (₪)','commission':'עמלות חודשיות (₪)','bonus':'בונוס חודשי (₪)','pension':'פנסיית עובד (%)','fund':'קרן השתלמות עובד (%)','credits':'נקודות זיכוי','participation':'השתתפות עובד ברכב (₪)'}
 
 def check(page,query,nav,screenshots,all_browser_files=True):
  root=Path(__file__).resolve().parent.parent
  baseline=query('/admin/configuration');configuration=deepcopy(baseline['configuration'])
- configuration['ai']['payslipEnabled']=True;configuration['ai']['enabled']=False
- configuration['ai']['payslipOcr'].update(languages='heb+eng',minimumConfidence=75,timeoutSeconds=60,maxPages=3)
- query('/admin/configuration',{'expectedRevision':baseline['revision'],'configuration':configuration,'note':'six-feature synthetic acceptance'})
+ keys=configure(configuration)
+ configuration=query('/admin/configuration',{'expectedRevision':baseline['revision'],'configuration':configuration,'apiKeys':keys,'note':'six-feature synthetic acceptance with mocked document provider'})['configuration']
  employee=query('/data')['employees'][0];conversation=query('/conversation/'+employee['id']);employee=(conversation or {}).get('employee') or employee
  query('/profile',{'employee':employee})
  before_profile=deepcopy(query('/conversation/'+employee['id'])['employee']);before_history=query('/history/'+employee['id'])
@@ -58,78 +58,29 @@ def check(page,query,nav,screenshots,all_browser_files=True):
   assert updated['choice']['chosen']['net']==old['choice']['chosen']['net'] # snapshot immutable
   current=query('/admin/configuration');query('/admin/configuration',{'expectedRevision':current['revision'],'configuration':configuration,'note':'restore for browser OCR'})
   page.reload();page.wait_for_selector('.vehicle-card');nav('הנתונים שלי')
-  expect(page.get_by_label('מיקום עיבוד התלוש')).to_have_value('browser')
+  expect(page.get_by_label('מיקום עיבוד התלוש')).to_have_count(0)
+  # The new UI prepares image-only redacted copies; provider responses are controlled fixtures, not accuracy claims.
+  values={'salary':18000,'commission':0,'bonus':0,'pension':6,'fund':2.5,'credits':2.25,'participation':350}
+  uploaded=[];handler=mock(page,lambda:values,uploaded)
   with ZipFile(root/'examples/payslips/complex/CarWise-complex-demo-payslips.zip') as archive:
-   expected=json.loads(archive.read(next(n for n in archive.namelist() if n.endswith('expected-values.json'))))
-   files=[n for n in archive.namelist() if n.endswith(('.pdf','.png','.jpg'))]
-   if not all_browser_files:files=[n for n in files if n.endswith(('01-complex-monthly.pdf','01-complex-monthly.png'))]
-   for name in sorted(files):
-    raw=archive.read(name);suffix=Path(name).suffix;kind={'.pdf':'application/pdf','.png':'image/png','.jpg':'image/jpeg'}[suffix]
-    page.get_by_label('העלאת תלוש שכר').set_input_files({'name':Path(name).name,'mimeType':kind,'buffer':raw})
-    page.locator('.payslip-consent input').check();start=time.monotonic();page.get_by_role('button',name='חילוץ נתונים מהתלוש',exact=True).click()
-    try:page.locator('.payslip-review').wait_for(timeout=75000)
-    except Exception:raise AssertionError(name+': '+page.locator('.payslip-panel').inner_text()[-1000:])
-    values={key:page.get_by_label('חילוץ '+label,exact=True).input_value() for key,label in LABELS.items()}
-    case=Path(name).stem.replace('-scanned','');wrong={key:(value,expected[case][key]) for key,value in values.items() if value and float(value)!=expected[case][key]}
-    missing=[key for key,value in values.items() if not value]
-    evidence['browserFiles'].append({'file':Path(name).name,'seconds':round(time.monotonic()-start,3),'values':values,'missing':missing,'wrong':wrong})
-    assert not wrong,(name,wrong)
-    assert not missing,(name,missing)
-    print('Browser OCR:',Path(name).name,'7/7',round(time.monotonic()-start,2),'seconds',flush=True)
-    if len(evidence['browserFiles'])==1:
-     select_all=page.get_by_label('בחר הכול — אישור שדות התלוש',exact=True)
-     select_all.check()
-     for label in LABELS.values():expect(page.get_by_label('אישור '+label,exact=True)).to_be_checked()
-     select_all.uncheck()
-     for label in LABELS.values():expect(page.get_by_label('אישור '+label,exact=True)).not_to_be_checked()
-     salary=page.get_by_label('חילוץ '+LABELS['salary'],exact=True);salary.fill('250000');select_all.check()
-     expect(page.get_by_label('אישור '+LABELS['salary'],exact=True)).not_to_be_checked()
-     salary.fill(values['salary']);select_all.check()
-     for label in LABELS.values():expect(page.get_by_label('אישור '+label,exact=True)).to_be_checked()
-     select_all.uncheck()
-     evidence['selectAllValidFieldsOnly']=True
-    # Coordinates must refer to the displayed source, not a made-up evidence excerpt.
-    expect(page.get_by_role('button',name='מקור שכר בסיס חודשי (₪)',exact=True)).to_be_visible()
-    page.get_by_role('button',name='מקור שכר בסיס חודשי (₪)',exact=True).click()
-    expect(page.locator('.payslip-highlight.value')).to_have_count(1)
-    assert page.locator('.payslip-highlight.value').evaluate('(e)=>e.getBoundingClientRect().width>0')
-    if suffix=='.png':page.screenshot(path=str(screenshots/'browser-ocr-source.png'),full_page=True)
-   # Reproduce cancellation during async canvas encoding deterministically. In
-   # Tesseract 6 recognize(canvas) can otherwise post to a terminated worker
-   # after its internal toBlob/FileReader preparation finishes.
-   page.evaluate("""() => {
-    const original=HTMLCanvasElement.prototype.toBlob;
-    window.carwiseEncodingReached=false;window.carwiseReleaseEncoding=null;
-    HTMLCanvasElement.prototype.toBlob=function(callback,...args){
-     original.call(this,blob=>{window.carwiseEncodingReached=true;
-      window.carwiseReleaseEncoding=()=>callback(blob);},...args);
-    };
-    window.carwiseRestoreEncoding=()=>{HTMLCanvasElement.prototype.toBlob=original};
-   }""")
-   picture=next(n for n in archive.namelist() if n.endswith('01-complex-monthly.png'))
-   page.get_by_label('העלאת תלוש שכר').set_input_files({'name':'cancel-synthetic.png','mimeType':'image/png','buffer':archive.read(picture)})
-   page.locator('.payslip-consent input').check();page.get_by_role('button',name='חילוץ נתונים מהתלוש',exact=True).click()
-   page.wait_for_function('window.carwiseEncodingReached===true',timeout=60000)
-   page.get_by_role('button',name='ביטול חילוץ',exact=True).click()
-   expect(page.locator('.payslip-panel [role=alert]')).to_contain_text('החילוץ בוטל')
-   expect(page.locator('.payslip-review')).to_have_count(0)
-   page.evaluate('window.carwiseReleaseEncoding();window.carwiseRestoreEncoding()')
-   page.wait_for_timeout(500)
-   evidence['cancelledWithoutServerFallback']=True
-   # Two actual uploads selected together, reviewed separately. Neither file is posted.
    names=[n for n in archive.namelist() if n.endswith(('01-complex-monthly.pdf','02-complex-sales.pdf')) and '-scanned' not in n]
    page.get_by_label('העלאת תלוש שכר').set_input_files([{'name':Path(n).name,'mimeType':'application/pdf','buffer':archive.read(n)} for n in sorted(names)])
    expect(page.locator('.payslip-queue')).to_contain_text('עוד 1 תלושים')
+   assert not uploaded
    for index,period in enumerate(['2026-08','2026-09']):
-    page.locator('.payslip-consent input').check();page.get_by_role('button',name='חילוץ נתונים מהתלוש',exact=True).click();page.locator('.payslip-review').wait_for(timeout=30000)
+    values['bonus']=0 if index==0 else 1500
+    prepare(page);extract(page)
+    select_all=page.get_by_label('בחר הכול — אישור שדות התלוש',exact=True);select_all.check()
+    for label in LABELS.values():expect(page.get_by_label('אישור '+label,exact=True)).to_be_checked()
     if index==1:expect(page.locator('.month-differences')).to_contain_text('בונוס חודשי (₪) השתנה')
-    for label in LABELS.values():page.get_by_label('אישור '+label,exact=True).check()
     page.get_by_label('חודש התלוש',exact=True).fill(period)
     page.get_by_label('סוג הבונוס',exact=True).select_option('none' if index==0 else 'oneOff')
     page.get_by_role('button',name='שמירת חודש מאושר להשוואה',exact=True).click()
     expect(page.locator('.payslip-month-save [role=status]')).to_contain_text('הפרופיל הנוכחי לא השתנה')
     if index==0:page.get_by_role('button',name='מעבר לתלוש הבא').click()
-  assert not posts,posts;assert not external,external
+  assert len(uploaded)==2 and len(posts)==2 and not external
+  page.unroute('**/api/payslip/extract?**',handler)
+  evidence['reviewedRedactedCopies']=2;evidence['provider']='mocked, no paid AI or extraction accuracy claim'
   persisted=query('/decision/state/'+employee['id']);assert len(persisted['months'])==2
   assert query('/conversation/'+employee['id'])['employee']==before_profile
   assert query('/history/'+employee['id'])==before_history
@@ -170,4 +121,4 @@ def check(page,query,nav,screenshots,all_browser_files=True):
   page.remove_listener('request',on_request);page.remove_listener('pageerror',on_error)
   page.set_viewport_size({'width':1440,'height':1100})
   current=query('/admin/configuration');query('/admin/restore',{'expectedRevision':current['revision'],'revision':baseline['revision'],'note':'restore after six-feature verification'})
- print('PASS: conditional exact boundary, pending values remain null, immutable choice and active-policy recalculation; multi-month explicit review/classification and persistence/removal; browser PDF/WASM OCR with zero document uploads/external requests, source highlights; scenario chart without profile/history writes; mobile and reload.')
+ print('PASS: conditional exact boundary, pending values remain null, immutable choice and active-policy recalculation; multi-month explicit review/classification and persistence/removal; locally prepared reviewed image-only documents with mocked AI responses; scenario chart without profile/history writes; mobile and reload.')

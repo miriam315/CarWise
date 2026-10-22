@@ -6,37 +6,36 @@ using Microsoft.Extensions.Configuration;
 using Xunit;
 namespace CarWise.Tests;
 
-public sealed class StubLocalOcr(LocalOcrStatus status) : ILocalPayslipOcr
-{
-    public int Checks {get;private set;}
-    public Task<LocalOcrStatus> StatusAsync(LocalPayslipSettings settings,CancellationToken ct){Checks++;return Task.FromResult(status);}
-    public Task<PayslipResult> ExtractAsync(AiDocument document,LocalPayslipSettings settings,long revision,CancellationToken ct)=>throw new NotSupportedException();
-}
 public sealed class PayslipAvailabilityTests
 {
     private static readonly ReferenceData Source=ReferenceData.FromFiles(Path.Combine(AppContext.BaseDirectory,"data"));
-    [Fact] public async Task LocalPayslipsSaveWithoutChatAiKeysOrDocumentModels()
+    [Fact] public async Task DocumentExtractionNeedsDocumentModelAndKeyButNotChatAiOrDocker()
     {
         var db=new MemoryConfigurationDatabase();var vault=new SecretVault(db,new EphemeralDataProtectionProvider(),new ConfigurationBuilder().Build());
         var missing=new AiProfile{KeyReference="environment:CARWISE_AI_NOT_CONFIGURED"};
         var ai=new AiConfiguration(false,missing,missing){PayslipEnabled=true};
+        Assert.Equal("document_model_required",(await PayslipAvailability.ReadAsync(ai,vault,default)).Code);
+        ai=ai with{Extraction=missing with{SupportsDocuments=true}};
+        Assert.Equal("key_required",(await PayslipAvailability.ReadAsync(ai,vault,default)).Code);
+        ai=ai with{Extraction=ai.Extraction with{KeyReference=await vault.StoreAsync("TEST-DOCUMENT-KEY","api.openai.com",default)}};
         var config=new ManagedConfiguration(Source.Rules.DeepClone(),Source.Cars,Source.OccupationDocuments,Source.Employees,ai);
         var state=new ConfigurationState(new(new(0,DateTimeOffset.UtcNow,"test","test",config,[]),Source));
-        var ocr=new StubLocalOcr(new(true,"ready","local ready"));
-        var service=new ConfigurationService(db,state,new(Source),vault,localOcr:ocr);
-        await service.SaveAsync(new(0,config,"enable local OCR without any API key"),"admin",default);
+        var service=new ConfigurationService(db,state,new(Source),vault);
+        await service.SaveAsync(new(0,config,"document AI without chat AI or local OCR"),"admin",default);
         Assert.False(state.Current.Document.Configuration.Ai.Enabled);
-        var status=await PayslipAvailability.ReadAsync(ai,ocr,default);Assert.True(status.Enabled);Assert.Equal("ready",status.Code);
-        Assert.Contains("ready",JsonDefaults.Serialize(await service.ViewAsync(default)));
-        var checks=ocr.Checks;var disabled=await PayslipAvailability.ReadAsync(ai with{PayslipEnabled=false},ocr,default);
-        Assert.False(disabled.Enabled);Assert.Equal("disabled",disabled.Code);Assert.Equal(checks,ocr.Checks);
+        Assert.True((await PayslipAvailability.ReadAsync(ai,vault,default)).Enabled);
+        Assert.Equal("disabled",(await PayslipAvailability.ReadAsync(ai with{PayslipEnabled=false},vault,default)).Code);
+        Assert.DoesNotContain("TEST-DOCUMENT-KEY",JsonDefaults.Serialize(await service.ViewAsync(default)));
     }
-    [Fact] public async Task MissingToolsAreExplicitAndNeverTriggerAnAiFallback()
+    [Fact] public async Task LegacyLocalOcrSettingsDoNotEnableExternalCallsOrBreakConfigurationLoading()
     {
-        var profile=new AiProfile();var ai=new AiConfiguration(true,profile,profile){PayslipEnabled=true};
-        var missing=new StubLocalOcr(new(false,"ocr_tools_missing","missing local tools"));
-        var status=await PayslipAvailability.ReadAsync(ai,missing,default);
-        Assert.False(status.Enabled);Assert.Equal("ocr_tools_missing",status.Code);
-        Assert.Equal("ocr_unavailable",(await PayslipAvailability.ReadAsync(ai,null,default)).Code);
+        var profile=new AiProfile();var ai=new AiConfiguration(false,profile,profile){PayslipEnabled=true,
+            Models=[new("text","text",profile)],ServiceModels=new(){{"extraction","text"},{"narration","text"},{"payslip","retired"}}};
+        var config=new ManagedConfiguration(Source.Rules.DeepClone(),Source.Cars,Source.OccupationDocuments,Source.Employees,ai);
+        new ConfigurationValidator(Source).Validate(config);
+        Assert.False((await PayslipAvailability.ReadAsync(ai,null,default)).Enabled);
+        var db=new MemoryConfigurationDatabase();var vault=new SecretVault(db,new EphemeralDataProtectionProvider(),new ConfigurationBuilder().Build());
+        var state=new ConfigurationState(new(new(0,DateTimeOffset.UtcNow,"test","test",config,[]),Source));
+        await Assert.ThrowsAsync<ArgumentException>(()=>new ConfigurationService(db,state,new(Source),vault).SaveAsync(new(0,config,"invalid enabled binding"),"admin",default));
     }
 }

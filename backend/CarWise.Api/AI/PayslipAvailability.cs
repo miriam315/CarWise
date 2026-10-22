@@ -2,13 +2,28 @@ using CarWise.Api.Administration;
 namespace CarWise.Api.AI;
 
 public sealed record PayslipStatus(bool Enabled,string Code,string Message)
-{public bool BrowserEnabled {get;init;}public LocalPayslipSettings Settings {get;init;}=new();}
+{
+    public int MaxPages {get;init;}=6;
+    public string? Provider {get;init;}
+    public string? Model {get;init;}
+}
 public static class PayslipAvailability
 {
-    public static async Task<PayslipStatus> ReadAsync(AiConfiguration ai,ILocalPayslipOcr? ocr,CancellationToken ct)
+    public static AiProfile? DocumentProfile(AiConfiguration ai)
     {
-        if(!ai.PayslipEnabled)return new(false,"disabled","חילוץ תלושים כבוי בהגדרות השמורות. יש להפעיל ולשמור אותו בניהול ← פרומפטים ותלושים.");
-        if(ocr is null)return new(false,"ocr_unavailable","מנוע ה־OCR המקומי אינו מותקן בשרת. אפשר להזין נתונים ידנית."){BrowserEnabled=true,Settings=ai.PayslipOcr};
-        var status=await ocr.StatusAsync(ai.PayslipOcr,ct);return new(status.Ready,status.Code,status.Message){BrowserEnabled=true,Settings=ai.PayslipOcr};
+        if(ai.Models.Count==0)return ai.Extraction.SupportsDocuments?ai.Extraction:null;
+        return ai.ServiceModels.TryGetValue("payslip",out var id)?ai.Models.SingleOrDefault(m=>m.Id==id)?.Profile:null;
+    }
+    public static async Task<PayslipStatus> ReadAsync(AiConfiguration ai,SecretVault? vault,CancellationToken ct)
+    {
+        if(!ai.PayslipEnabled)return new(false,"disabled","חילוץ תלושים כבוי. הפעילו אותו בניהול ← פרומפטים ותלושים.");
+        var profile=DocumentProfile(ai);
+        if(profile is null||!profile.SupportsDocuments)return new(false,"document_model_required","יש לבחור בניהול מודל לשירות חילוץ תלושים ולסמן שהוא תומך ב־PDF ובתמונות.");
+        var configured=false;
+        if(vault is not null)foreach(var slot in profile.Keys().Where(k=>k.Enabled))
+            if(await vault.IsAvailableAsync(slot.KeyReference,ct,new Uri(profile.BaseUrl).Host)){configured=true;break;}
+        return new(configured,configured?"ready":"key_required",configured?
+            "חילוץ AI פעיל. רק עותק שתבדקו ותאשרו לאחר השחרה במכשיר יישלח לספק; בדקו את מדיניות השמירה שלו.":
+            "יש לשמור מפתח זמין למודל חילוץ התלושים בניהול ← ספקי AI."){Provider=profile.DisplayName.Length>0?profile.DisplayName:profile.Provider,Model=profile.Model};
     }
 }

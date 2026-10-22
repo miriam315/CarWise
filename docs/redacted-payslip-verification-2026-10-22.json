@@ -1,0 +1,37 @@
+{
+  "passed": true,
+  "sourceStayedLocalBeforeApproval": true,
+  "redactionsBurnedIntoPixels": true,
+  "noOriginalPdfTextOrMetadata": true,
+  "allPagesReviewRequired": true,
+  "editingRevokesConsent": true,
+  "formats": [
+    "PDF",
+    "PNG",
+    "JPEG"
+  ],
+  "controlledExtractions": 3,
+  "provider": "mocked UI response; adapters tested in .NET; no paid AI accuracy claim",
+  "browserErrors": [],
+  "date": "2026-10-22",
+  "build": "passed",
+  "serverTests": {
+    "passed": 309,
+    "failed": 0,
+    "skippedHistoricalOcrTests": 3
+  },
+  "nodeTests": {
+    "passed": 6,
+    "failed": 0
+  },
+  "browserSuitesPassed": [
+    "fleet",
+    "intent",
+    "innovations",
+    "car-media",
+    "judge-demo",
+    "payslip"
+  ],
+  "adminModelAndPromptPersistence": "passed",
+  "hostedDeploymentVerified": false
+}

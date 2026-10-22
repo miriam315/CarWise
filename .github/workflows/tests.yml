@@ -42,7 +42,7 @@ jobs:
             sleep 1
           done
           exit 1
-      - name: Real API and browser tests (fleet, privacy, payroll, galleries, judge rehearsal)
+      - name: Real API and browser tests (fleet, privacy, redaction, galleries, judge rehearsal)
         run: npm run test:e2e -- --quick
         env:
           CARWISE_TEST_CONNECTION: Host=127.0.0.1;Port=55432;Database=carwise;Username=carwise;Password=ci-test-only
@@ -55,31 +55,4 @@ jobs:
             backend/CarWise.Tests/TestResults/
             .local/test-results/
             .local/innovation-verification.json
-          retention-days: 7
-
-  isolated-ocr:
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '10.0.x'
-      - run: npm run ocr:setup
-      - name: Isolation and all twelve dense synthetic payslips
-        run: node scripts/dotnet.mjs test backend/CarWise.Tests --nologo --filter 'FullyQualifiedName~OcrSandbox|FullyQualifiedName~ComplexPayrollIntegration' --logger trx
-        env:
-          CARWISE_VERIFY_OCR: 'true'
-          CARWISE_VERIFY_COMPLEX_OCR: 'true'
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: ocr-test-results
-          include-hidden-files: true
-          path: |
-            backend/CarWise.Tests/TestResults/
-            .local/complex-ocr-verification.json
           retention-days: 7

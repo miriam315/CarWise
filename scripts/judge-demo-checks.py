@@ -5,6 +5,7 @@ import subprocess
 import time
 from pathlib import Path
 from playwright.sync_api import expect
+from redacted_payslip_fixture import configure,prepare,extract,mock
 
 
 def check(query,page,nav,screenshots):
@@ -18,11 +19,11 @@ def check(query,page,nav,screenshots):
     readiness=subprocess.run(['node','scripts/check-cloud.mjs',page.url],cwd=root,capture_output=True,text=True,check=True)
     assert json.loads(readiness.stdout)['passed']
     step('Read-only readiness confirms actual local server, database and built assets')
-    config=query('/admin/configuration');draft=deepcopy(config['configuration']);draft['ai']['enabled']=False;draft['ai']['payslipEnabled']=True
+    config=query('/admin/configuration');draft=deepcopy(config['configuration']);keys=configure(draft)
     employee={**draft['employees'][0],'id':'E-JUDGE-REHEARSAL','name':'עובד הדגמה לשופטים','children':4,'currentCar':'CAR-09','knownFields':['children','currentCar'],'advisorState':None}
     draft['employees'].append(employee)
     next(c for c in draft['cars'] if c['id']=='CAR-10')['participationKnown']=False
-    query('/admin/configuration',{'expectedRevision':config['revision'],'configuration':draft,'note':'Synthetic isolated judge rehearsal'})
+    query('/admin/configuration',{'expectedRevision':config['revision'],'configuration':draft,'apiKeys':keys,'note':'Synthetic isolated judge rehearsal'})
     page.reload();page.wait_for_selector('.vehicle-card')
     page.get_by_label('בחירת עובד לדוגמה',exact=True).select_option(employee['id'])
     expect(page.get_by_role('heading',name='נשלים רק את מה שחסר.',exact=True)).to_be_visible()
@@ -31,18 +32,18 @@ def check(query,page,nav,screenshots):
     step('Missing salary prompts one question; no final net')
 
     nav('הנתונים שלי')
-    page.get_by_label('מיקום עיבוד התלוש',exact=True).select_option('browser')
+    controlled=[]
+    handler=mock(page,{'salary':18000,'commission':0,'bonus':0,'pension':6,'fund':2.5,'credits':2.25,'participation':350},controlled)
     path=Path(__file__).resolve().parent.parent/'examples/payslips/complex/01-complex-monthly.pdf'
     page.get_by_label('העלאת תלוש שכר',exact=True).set_input_files(str(path))
-    page.locator('.payslip-consent input').check()
-    page.get_by_role('button',name='חילוץ נתונים מהתלוש',exact=True).click()
-    page.locator('.payslip-review').wait_for(timeout=30000)
+    prepare(page);extract(page)
+    page.unroute('**/api/payslip/extract?**',handler)
     assert 'salary' not in query('/conversation/'+employee['id'])['employee']['knownFields']
     page.get_by_label('בחר הכול — אישור שדות התלוש',exact=True).check()
     page.get_by_role('button',name='אישור והעברת השדות המסומנים לטופס',exact=True).click()
     page.get_by_role('button',name='שמירה וחישוב מחדש',exact=False).click()
     page.wait_for_selector('.vehicle-card')
-    step('Dense PDF locally extracted, reviewed and explicitly saved')
+    step('Dense PDF rasterized and reviewed locally, mocked AI fields explicitly saved')
 
     nav('קטלוג הרכבים')
     page.get_by_label('חיפוש רכב',exact=True).fill('ATTO')
@@ -100,9 +101,9 @@ def check(query,page,nav,screenshots):
     expect(page.get_by_label('סיכום השינוי בנטו',exact=True).locator('.net-drivers article')).to_have_count(3)
     assert query('/conversation/'+employee['id'])['status']=='Active'
     step('Approved choice and conversation persist after reload; mobile fits')
-    assert not uploads,uploads
+    assert len(uploads)==1 and len(controlled)==1
     page.remove_listener('request',request)
-    report={'passed':True,'environment':'isolated local PostgreSQL, demo identity, rule-based chat; no hosted Auth or paid AI claim',
+    report={'passed':True,'environment':'isolated local PostgreSQL, demo identity, rule-based chat; mocked document provider; no hosted Auth or paid AI accuracy claim',
             'seconds':round(time.monotonic()-started,3),'steps':steps,'documentUploads':len(uploads),
             'note':'Elapsed time is an automated local rehearsal, not a cloud SLA or human presentation duration.'}
     (screenshots/'judge-rehearsal.json').write_text(json.dumps(report,indent=2)+'\n')
