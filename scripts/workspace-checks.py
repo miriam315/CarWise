@@ -8,6 +8,11 @@ def check(query,page,nav,screenshots):
     # Text can shrink below the old minimum and the chosen size survives reload.
     size=page.get_by_role('group',name='גודל טקסט',exact=True)
     expect(size).to_contain_text('80 אחוז')
+    toggle=page.get_by_role('button',name='אפשרויות גודל הטקסט',exact=True)
+    expect(toggle).to_have_attribute('aria-expanded','false')
+    expect(page.get_by_role('button',name='הקטנת טקסט',exact=True)).to_have_count(0)
+    toggle.click()
+    expect(toggle).to_have_attribute('aria-expanded','true')
     initial_font=page.evaluate('parseFloat(getComputedStyle(document.documentElement).fontSize)')
     for _ in range(2):page.get_by_role('button',name='הקטנת טקסט',exact=True).click()
     expect(size).to_contain_text('60 אחוז')
@@ -15,8 +20,17 @@ def check(query,page,nav,screenshots):
     assert page.evaluate('parseFloat(getComputedStyle(document.documentElement).fontSize)')<initial_font
     page.reload()
     expect(size).to_contain_text('60 אחוז')
+    expect(toggle).to_have_attribute('aria-expanded','false')
+    toggle.click()
     page.get_by_role('button',name='איפוס גודל הטקסט',exact=True).click()
     expect(size).to_contain_text('80 אחוז')
+    page.get_by_role('button',name='איפוס גודל הטקסט',exact=True).press('Escape')
+    expect(toggle).to_have_attribute('aria-expanded','false')
+    expect(toggle).to_be_focused()
+    launcher=page.get_by_role('button',name='פתיחת היועץ החכם',exact=True)
+    expect(launcher).to_have_text('')
+    bounds=launcher.bounding_box()
+    assert bounds and bounds['width']<=50 and bounds['height']<=50
 
     nav('קטלוג הרכבים')
     heading=page.get_by_role('heading',name='נעים להכיר. האפשרויות שלך.',exact=True)

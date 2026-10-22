@@ -58,3 +58,7 @@ body{padding-bottom:88px}.text-size-control{position:fixed;inset-inline-end:10px
 .advisor-launcher{bottom:100px}
 
 .advisor-widget .chat-header{flex-wrap:wrap}.advisor-widget .chat-new{font-size:calc(18px * var(--text-scale,1));white-space:nowrap;padding:6px}
+
+.text-size-options{display:flex;align-items:center;gap:3px}.text-size-control .text-size-toggle{padding:0;background:#fff;color:#6540bb}
+
+.advisor-launcher{width:48px;height:48px;padding:0;gap:0;border-radius:50%}
