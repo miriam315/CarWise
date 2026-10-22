@@ -116,6 +116,8 @@ builder.Services.AddSingleton(repository);builder.Services.AddSingleton(database
 builder.Services.AddScoped<DecisionStore>();
 builder.Services.AddScoped<FleetStore>();
 builder.Services.AddScoped<FleetService>();
+builder.Services.AddScoped<IntentAnalytics>();
+builder.Services.AddHostedService<IntentRetentionWorker>();
 builder.Services.AddSingleton<AiKeyHealth>();
 builder.Services.AddSingleton<IOcrSandboxRuntime,DockerOcrRuntime>();
 builder.Services.AddSingleton<ILocalPayslipOcr,SandboxedPayslipOcr>();
@@ -141,6 +143,7 @@ builder.Services.AddRateLimiter(options=>{
     options.RejectionStatusCode=429;
     options.AddPolicy("documents",context=>RateLimitPartition.GetFixedWindowLimiter(context.Items["caller"] is Caller caller?caller.UserId:context.Connection.RemoteIpAddress?.ToString()??"unknown",_=>new FixedWindowRateLimiterOptions{PermitLimit=5,Window=TimeSpan.FromMinutes(1),QueueLimit=0}));
     options.AddPolicy("login",context=>RateLimitPartition.GetFixedWindowLimiter(context.Connection.RemoteIpAddress?.ToString()??"unknown",_=>new FixedWindowRateLimiterOptions{PermitLimit=8,Window=TimeSpan.FromMinutes(1),QueueLimit=0}));
+    options.AddPolicy("intent",context=>RateLimitPartition.GetFixedWindowLimiter(context.Connection.RemoteIpAddress?.ToString()??"unknown",_=>new FixedWindowRateLimiterOptions{PermitLimit=12,Window=TimeSpan.FromMinutes(1),QueueLimit=0}));
 });
 var app=builder.Build();
 // Trust only the framework's default loopback proxies unless explicitly configured by the host.
@@ -212,7 +215,7 @@ app.MapGet("/api/data",async(HttpContext context,ConfigurationSnapshot snapshot,
     var caller=context.Items["caller"] as Caller;
     var currentUser=new{userId=caller?.UserId??"demo",email=caller?.Email??"",displayName=caller?.DisplayName??"",
         role=demo?"demo":caller?.IsAdmin==true?"admin":caller?.IsAgent==true?"agent":"employee",employeeId=caller?.EmployeeId};
-    return new{currentUser,
+    return new{currentUser,fleetVisible=snapshot.Document.Configuration.Fleet.ShowToEmployees,
     cars=reference.Cars.Select(reference.Enrich),employees=reference.Employees.Where(e=>demo || context.Items["caller"] is Caller c && (c.IsAdmin||e.Id==c.EmployeeId)),
     occupations=reference.OccupationDocuments,rules=reference.Rules,officialCount=reference.OfficialRowCount,canAdmin=access.CanAdmin(context),canAgent=demo||context.Items["caller"] is Caller{IsAgent:true},configurationRevision=snapshot.Document.Revision,payslipEnabled=payslipStatus.Enabled,payslipStatus};
 });
@@ -260,9 +263,22 @@ app.MapGet("/api/conversation/{employee}",async(string employee,HttpContext cont
 {
     access.Employee(context,employee);return await repository.ConversationAsync(employee,ct);
 });
-app.MapPost("/api/chat",async(ChatRequest request,HttpContext context,AccessControl access,AdvisorService advisor,CancellationToken ct)=>
+app.MapPost("/api/chat",async(ChatRequest request,HttpContext context,AccessControl access,AdvisorService advisor,IntentAnalytics intents,CancellationToken ct)=>
 {
-    AuthorizeEmployee(context,access,request.Employee);context.RequestServices.GetRequiredService<AiOperationContext>().ConversationId=request.Employee.Id;return await advisor.ChatAsync(request,ct,demo||context.Items["caller"] is Caller{IsAdmin:true});
+    AuthorizeEmployee(context,access,request.Employee);context.RequestServices.GetRequiredService<AiOperationContext>().ConversationId=request.Employee.Id;
+    var result=await advisor.ChatAsync(request,ct,demo||context.Items["caller"] is Caller{IsAdmin:true});
+    if(intents.Policy.Enabled)
+    {
+        var reply=JsonNode.Parse(JsonDefaults.Serialize(result));
+        if(reply?["complete"]?.GetValue<bool>()==true)
+        {
+            var target=reply["target"]?.GetValue<string>();
+            if(FleetRules.Category(request.Text,out var category))target="category:"+category;
+            else if(target is null&&request.Text.Contains("חשמלי",StringComparison.Ordinal))target="category:electric";
+            if(target is not null)await intents.Observe(context,access,request.Employee.Id,target,"explore",ct);
+        }
+    }
+    return result;
 });
 app.MapPost("/api/tickets",async(TicketRequest request,HttpContext context,AccessControl access,PayrollEngine engine,ReferenceData reference,CancellationToken ct)=>
 {
@@ -314,6 +330,7 @@ app.MapAdministration(repository.Provider,supabaseUrl,demo);
 app.MapPayslips();
 app.MapDecisionTools(AuthorizeEmployee);
 app.MapFleet();
+app.MapIntentAnalytics();
 var dist=Path.Combine(root,"dist");
 if(!Directory.Exists(dist))dist=Path.Combine(AppContext.BaseDirectory,"wwwroot");
 if(Directory.Exists(dist))

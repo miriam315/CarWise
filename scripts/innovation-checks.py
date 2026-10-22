@@ -76,6 +76,18 @@ def check(page,query,nav,screenshots,all_browser_files=True):
     assert not wrong,(name,wrong)
     assert not missing,(name,missing)
     print('Browser OCR:',Path(name).name,'7/7',round(time.monotonic()-start,2),'seconds',flush=True)
+    if len(evidence['browserFiles'])==1:
+     select_all=page.get_by_label('בחר הכול — אישור שדות התלוש',exact=True)
+     select_all.check()
+     for label in LABELS.values():expect(page.get_by_label('אישור '+label,exact=True)).to_be_checked()
+     select_all.uncheck()
+     for label in LABELS.values():expect(page.get_by_label('אישור '+label,exact=True)).not_to_be_checked()
+     salary=page.get_by_label('חילוץ '+LABELS['salary'],exact=True);salary.fill('250000');select_all.check()
+     expect(page.get_by_label('אישור '+LABELS['salary'],exact=True)).not_to_be_checked()
+     salary.fill(values['salary']);select_all.check()
+     for label in LABELS.values():expect(page.get_by_label('אישור '+label,exact=True)).to_be_checked()
+     select_all.uncheck()
+     evidence['selectAllValidFieldsOnly']=True
     # Coordinates must refer to the displayed source, not a made-up evidence excerpt.
     expect(page.get_by_role('button',name='מקור שכר בסיס חודשי (₪)',exact=True)).to_be_visible()
     page.get_by_role('button',name='מקור שכר בסיס חודשי (₪)',exact=True).click()

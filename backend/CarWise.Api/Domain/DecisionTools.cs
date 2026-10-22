@@ -163,7 +163,7 @@ public static class DecisionRoutes
             }
             return new{revision=saved.Revision,months,choice=saved.Choice,change,configurationRevision=snapshot.Document.Revision};
         });
-        app.MapPost("/api/decision/choice",async(SaveChoiceRequest request,HttpContext context,AccessControl access,ConfigurationSnapshot snapshot,Repository repository,DecisionStore store,CancellationToken ct)=>
+        app.MapPost("/api/decision/choice",async(SaveChoiceRequest request,HttpContext context,AccessControl access,ConfigurationSnapshot snapshot,Repository repository,DecisionStore store,IntentAnalytics intents,CancellationToken ct)=>
         {
             authorize(context,access,request.Employee);var engine=new PayrollEngine(snapshot.Data);var e=engine.Validate(request.Employee);IntakeFields.RequireComplete(e);
             var approved=await repository.ParticipationAsync(e.Id,ct);var sim=engine.Simulate(e,approved.Overrides,approved.Pending);
@@ -172,7 +172,9 @@ public static class DecisionRoutes
             var before=await store.Read(e.Id,ct);if(before.Revision!=request.ExpectedRevision)throw new ArgumentException("הנתונים השתנו. רעננו ונסו שוב.");
             var minimized=e with{Name="",Question="",CurrentModel="",AdvisorState=null};
             var choice=new ChoiceSnapshot(DateTimeOffset.UtcNow,snapshot.Document.Revision,snapshot.Document.Configuration.OfficialVersionId,minimized,request.Target,sim.Current,chosen,snapshot.Data.Rules.DeepClone()){CurrentCar=snapshot.Data.Cars.SingleOrDefault(c=>c.Id==e.CurrentCar) is {} currentCar?snapshot.Data.Enrich(currentCar):null};
-            return await store.Write(e.Id,before,before.Months,choice,ct);
+            var saved=await store.Write(e.Id,before,before.Months,choice,ct);
+            await intents.Observe(context,access,e.Id,request.Target,"choice_saved",ct);
+            return saved;
         });
     }
 }

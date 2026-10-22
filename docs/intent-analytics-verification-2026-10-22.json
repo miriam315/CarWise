@@ -1,0 +1,40 @@
+{
+  "verifiedAtUtc": "2026-10-22T06:00:40+00:00",
+  "baseCommit": "2fec3152017119554bb5c6ca8126f8f86ffd7579",
+  "fullSuite": {
+    "passed": 260,
+    "failed": 0,
+    "skipped": 0
+  },
+  "finalFocusedSuite": {
+    "passed": 23,
+    "failed": 0
+  },
+  "checks": {
+    "fullDotnetSuite": "passed",
+    "finalIntentUnitSuite": "passed",
+    "intentBrowserAndRestart": "passed",
+    "supabaseAdapterAndRoles": "passed",
+    "fleetVisibilityAndWorkflow": "passed",
+    "payrollSelectAllAndDecisionRegression": "passed",
+    "legacyBrowserSmoke": "passed"
+  },
+  "ui": {
+    "sourcesNavigationRemoved": true,
+    "selectAllSkipsInvalidAndMissingFields": true,
+    "employeeSwapVisibilityManagedAndServerEnforced": true
+  },
+  "analytics": {
+    "collectionDefault": "disabled",
+    "consent": "worker opt-in; admin cannot consent for an employee",
+    "report": "aggregate, minimum cohort and complement suppression",
+    "freeTextAndPayrollExport": false,
+    "actualAdoptionForecastAvailable": false,
+    "scenario": "authoritative financial viability; manual adoption/cost assumptions explicitly labelled",
+    "syntheticDemo": "in memory only; standardized synthetic pay fields; no persistent events or employees",
+    "ai": "may select an existing aggregate insight id only",
+    "retention": "query-time expiry filtering; hourly CAS cleanup; immediate opt-out clears active research events"
+  },
+  "externalSupabaseProjectUsed": false,
+  "paidAiInferenceUsed": false
+}

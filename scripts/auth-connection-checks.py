@@ -46,6 +46,13 @@ def check(base,query,settings,service_token):
   denied('/conversation/E-002',employee,403);denied('/admin/configuration',employee,403);denied('/admin/server-connection',employee,403)
   denied('/payslip/extract?employee=E-002&consent=true',employee,403,{})
   denied('/decision/state/E-002',employee,403)
+  denied('/intent/preference/E-002',employee,403);denied('/admin/intent/report',employee,403)
+  denied('/admin/intent/scenario',employee,403,{'category':'electric','additionalBenefit':200})
+  denied('/admin/intent/demo',employee,403,{'category':'electric','additionalBenefit':200})
+  denied('/admin/intent/prioritize',employee,403,{'days':30,'synthetic':False})
+  denied('/intent/preference',admin,403,{'employeeId':new_employee,'consent':True})
+  for endpoint in ['preference','explore','feedback']:
+   denied('/intent/'+endpoint,employee,403,{'employeeId':'E-002','consent':True,'target':'CAR-10','reason':'net'})
   denied('/fleet/state/E-002',employee,403);denied('/fleet/status/E-002',employee,403);denied('/fleet/officer',employee,403)
   for endpoint in ['request','propose','withdraw','consent']:
    denied('/fleet/'+endpoint,employee,403,{'expectedRevision':0,'employeeId':'E-002','category':'family','consent':True,'id':'00000000-0000-0000-0000-000000000000'})

@@ -10,6 +10,7 @@ public sealed class ConfigurationValidator(ReferenceData officialSource)
         try
         {
             FleetRules.Validate(config.Fleet);
+            IntentRules.Validate(config.IntentAnalytics);
             if(JsonDefaults.Serialize(config).Length>1_000_000)Fail("קובץ ההגדרות גדול מדי");
             if(config.Cars.Count is <1 or >500 || config.Occupations.Count is <1 or >500 || config.Employees.Count is <1 or >5000)
                 Fail("נדרשים קטלוג, עיסוקים ועובדים; הרשימות חורגות מהגודל המותר");
@@ -85,7 +86,7 @@ public sealed class ConfigurationValidator(ReferenceData officialSource)
                 Unique(config.Ai.Models.Select(m=>m.Id),"מודלי AI");
                 foreach(var model in config.Ai.Models)
                     if(!Regex.IsMatch(model.Id,@"^[a-z0-9-]{1,50}$")||string.IsNullOrWhiteSpace(model.Name)||model.Name.Length>100)Fail("שם או מזהה מודל לא תקין");
-                if(config.Ai.ServiceModels!.Count is <2 or >3||config.Ai.ServiceModels.Keys.Any(key=>key is not ("extraction" or "narration" or "payslip"))||new[]{"extraction","narration"}.Any(service=>!config.Ai.ServiceModels.TryGetValue(service,out var id)||!config.Ai.Models.Any(m=>m.Id==id)))Fail("יש לבחור מודל קיים לכל שירות AI");
+                if(config.Ai.ServiceModels!.Count is <2 or >4||config.Ai.ServiceModels.Keys.Any(key=>key is not ("extraction" or "narration" or "payslip" or "insights"))||new[]{"extraction","narration"}.Any(service=>!config.Ai.ServiceModels.TryGetValue(service,out var id)||!config.Ai.Models.Any(m=>m.Id==id))||config.Ai.ServiceModels.Any(binding=>binding.Key!="payslip"&&!config.Ai.Models.Any(m=>m.Id==binding.Value)))Fail("יש לבחור מודל קיים לכל שירות AI");
             }
             var ocr=config.Ai.PayslipOcr;
             if(ocr is null||ocr.Languages is not ("heb+eng" or "heb" or "eng")||ocr.MaxPages is <1 or >6||ocr.TimeoutSeconds is <10 or >120||ocr.MinimumConfidence is <50 or >100)

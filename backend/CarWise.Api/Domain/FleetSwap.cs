@@ -13,6 +13,7 @@ public sealed record FleetPolicy
     public bool Enabled {get;init;}=false;
     public int ReplacementMonths {get;init;}=36;
     public bool SwapEnabled {get;init;}=true;
+    public bool ShowToEmployees {get;init;}=true;
     public bool AllowEarlySwap {get;init;}=true;
     public int RequestValidityDays {get;init;}=30;
     public string[] ExceptionReasons {get;init;}=["role","family","location","medical","vehicle"];
@@ -59,7 +60,7 @@ public static class FleetRules
         if(assignment.ExceptionReason is {} reason&&policy.ExceptionReasons.Contains(reason)&&assignment.ExceptionUntil>=today)
             return new("exception",due,true,"אושר חריג בתוקף: "+Reasons[reason]+". המעבר עצמו עדיין דורש תיאום ואישור קצין רכב.");
         return today>=due?new("due",due,true,"הגיע מועד ההחלפה לפי המדיניות או סיום החוזה המאומת; נדרש תיאום עם קצין הרכב."):
-            new("locked",due,false,$"מועד ההחלפה הרגיל: {due:dd/MM/yyyy}. אפשר לבקש חריג מאושר או לבדוק החלפה פנימית, לפי המדיניות.");
+            new("locked",due,false,$"מועד ההחלפה הרגיל: {due:dd/MM/yyyy}. "+(policy.ShowToEmployees&&policy.SwapEnabled?"אפשר לבקש חריג מאושר או לבדוק החלפה פנימית, לפי המדיניות.":"אפשר לפנות לקצין הרכב לבדיקת חריג מאושר, לפי המדיניות."));
     }
     public static bool Active(FleetRequest request,FleetDocument doc,DateTimeOffset now)=>request.Open&&request.ExpiresAt>now&&doc.Assignments.Any(a=>a.Id==request.AssignmentId&&a.EmployeeId==request.EmployeeId&&a.Stamp==request.AssignmentStamp);
     public static bool Reserved(FleetDocument doc,string employee)=>doc.Proposals.Any(p=>p.Status=="approved"&&(doc.Requests.Any(r=>(r.Id==p.Left||r.Id==p.Right)&&r.EmployeeId==employee)));
@@ -188,11 +189,11 @@ public static class FleetRoutes
     {
         var group=app.MapGroup("/api/fleet");
         group.AddEndpointFilter(async(ctx,next)=>{try{return await next(ctx);}catch(FleetConflictException){return Results.Conflict(new{error="נתוני הצי השתנו. רעננו ובדקו את ההחלפה לפני ניסיון נוסף."});}});
-        group.MapGet("/state/{employee}",async(string employee,HttpContext ctx,AccessControl access,FleetService service,CancellationToken ct)=>{access.Employee(ctx,employee);return await service.View(employee,ct);});
+        group.MapGet("/state/{employee}",async(string employee,HttpContext ctx,AccessControl access,FleetService service,CancellationToken ct)=>{access.Employee(ctx,employee);return !service.Policy.ShowToEmployees?Results.NotFound(new{error="אפשרות ההחלפות אינה מוצגת לעובדים בארגון"}):Results.Ok(await service.View(employee,ct));});
         group.MapGet("/status/{employee}",async(string employee,HttpContext ctx,AccessControl access,FleetService service,FleetStore store,CancellationToken ct)=>{
             access.Employee(ctx,employee);var e=await service.Employee(employee,ct);var doc=await store.Read(ct);
             return FleetRules.Replacement(service.Policy,service.Assignment(doc,e),DateOnly.FromDateTime(DateTime.UtcNow)) with{
-                PendingOffers=doc.Proposals.Count(p=>p.Status=="pendingConsent"&&!p.Consents.Contains(employee)&&doc.Requests.Any(r=>(r.Id==p.Left||r.Id==p.Right)&&r.EmployeeId==employee))};
+                PendingOffers=service.Policy.ShowToEmployees?doc.Proposals.Count(p=>p.Status=="pendingConsent"&&!p.Consents.Contains(employee)&&doc.Requests.Any(r=>(r.Id==p.Left||r.Id==p.Right)&&r.EmployeeId==employee)):0};
         });
         group.MapGet("/officer",async(HttpContext ctx,AccessControl access,FleetStore store,FleetService service,CancellationToken ct)=>
         {
@@ -219,7 +220,7 @@ public static class FleetRoutes
         group.MapPost("/request",async(FleetRequestInput request,HttpContext ctx,AccessControl access,FleetStore store,FleetService service,CancellationToken ct)=>
         {
             access.Employee(ctx,request.EmployeeId);var doc=await store.Read(ct);var e=await service.Employee(request.EmployeeId,ct);
-            if(!service.Policy.Enabled||!service.Policy.SwapEnabled||!request.Consent)throw new ArgumentException("נדרשת מדיניות פעילה והסכמה לפרסום בקשת החלפה אנונימית");
+            if(!service.Policy.Enabled||!service.Policy.SwapEnabled||!service.Policy.ShowToEmployees||!request.Consent)throw new ArgumentException("נדרשת אפשרות החלפות מוצגת, מדיניות פעילה והסכמה לפרסום בקשה אנונימית");
             if(!new[]{"electric","family","regular"}.Contains(request.Category)||!service.Data.Cars.Any(c=>FleetRules.Accepts(request.Category,c)&&new PayrollEngine(service.Data).Eligibility(e,c).Eligible))throw new ArgumentException("אין זכאות למסלול המבוקש");
             var a=service.Assignment(doc,e)??throw new ArgumentException("נדרשת הקצאת רכב מאומתת בניהול, שתואמת לפרופיל ולזהות הרכב הפעילים");
             if(FleetRules.Reserved(doc,e.Id)||doc.Requests.Any(r=>r.EmployeeId==e.Id&&FleetRules.Active(r,doc,DateTimeOffset.UtcNow)))throw new ArgumentException("כבר קיימת בקשה פעילה או החלפה מאושרת");
@@ -239,6 +240,7 @@ public static class FleetRoutes
         group.MapPost("/propose",async(FleetAction request,HttpContext ctx,AccessControl access,FleetStore store,FleetService service,CancellationToken ct)=>
         {
             access.Employee(ctx,request.EmployeeId);var doc=await store.Read(ct);
+            if(!service.Policy.ShowToEmployees)throw new ArgumentException("אפשרות ההחלפות מוסתרת לעובדים");
             var own=doc.Requests.SingleOrDefault(r=>r.EmployeeId==request.EmployeeId&&FleetRules.Active(r,doc,DateTimeOffset.UtcNow));var other=doc.Requests.SingleOrDefault(r=>r.Id==request.Id);
             if(own is null||other is null||!await service.Mutual(doc,own,other,ct))throw new ArgumentException("ההתאמה אינה פעילה או שהזכאות השתנתה");
             if(doc.Proposals.Any(p=>p.Status is "pendingConsent" or "pendingOfficer"&&new[]{p.Left,p.Right}.Intersect(new[]{own.Id,other.Id}).Any()))throw new ArgumentException("אחד הצדדים כבר בתהליך החלפה; נדרשת הסכמה או ביטול ההצעה הקודמת");
@@ -248,6 +250,7 @@ public static class FleetRoutes
         group.MapPost("/consent",async(FleetAction request,HttpContext ctx,AccessControl access,FleetStore store,FleetService service,CancellationToken ct)=>
         {
             access.Employee(ctx,request.EmployeeId);var doc=await store.Read(ct);var p=doc.Proposals.SingleOrDefault(p=>p.Id==request.Id)??throw new ArgumentException("הצעה לא נמצאה");
+            if(request.Accept&&!service.Policy.ShowToEmployees)throw new ArgumentException("אפשרות ההחלפות מוסתרת לעובדים");
             var l=doc.Requests.Single(r=>r.Id==p.Left);var r=doc.Requests.Single(r=>r.Id==p.Right);
             if(l.EmployeeId!=request.EmployeeId&&r.EmployeeId!=request.EmployeeId)throw new UnauthorizedAccessException("Forbidden");
             if(p.Status is not ("pendingConsent" or "pendingOfficer"))throw new ArgumentException("ההצעה כבר נסגרה");

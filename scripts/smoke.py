@@ -79,7 +79,7 @@ with tempfile.TemporaryDirectory(prefix='carwise-smoke-') as temp:
     page.locator('.sidebar-bottom .strauss-logo').scroll_into_view_if_needed()
     bounds=page.locator('.sidebar-bottom .strauss-logo').bounding_box()
     assert bounds['y']>=0 and bounds['y']+bounds['height']<=height+1,(width,height,bounds)
-    nav('מקורות וכללים');expect(page.locator('.source-card').first).to_be_visible()
+    expect(page.locator('.sidebar nav').get_by_role('button',name='מקורות וכללים',exact=True)).to_have_count(0)
     page.locator('.sidebar .brand').scroll_into_view_if_needed()
     bounds=page.locator('.sidebar .brand').bounding_box();assert bounds['y']>=0
     nav('הסקירה שלי')

@@ -52,6 +52,7 @@ public sealed record ManagedConfiguration(JsonNode Rules,List<Car> Cars,List<Dic
 {
     public string OfficialVersionId {get;init;}="baseline";
     public FleetPolicy Fleet {get;init;}=new();
+    public IntentPolicy IntentAnalytics {get;init;}=new();
 }
 public sealed record ConfigurationVersion(long Revision,DateTimeOffset SavedAt,string Actor,string Note,ManagedConfiguration Configuration);
 public sealed record ConfigurationDocument(long Revision,DateTimeOffset SavedAt,string Actor,string Note,

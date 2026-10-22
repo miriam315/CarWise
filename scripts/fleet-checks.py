@@ -24,6 +24,16 @@ def check(query,page=None,nav=None,screenshots=None):
  save_config(config)
  try:
   assert state(a)['replacement']['status']=='unknown'
+  config['fleet']['showToEmployees']=False;save_config(config)
+  assert not query('/data')['fleetVisible']
+  reject('/fleet/state/'+a['id'],None,404)
+  reject('/fleet/request',{'employeeId':a['id'],'expectedRevision':revision(),'category':'family','consent':True})
+  if page is not None:
+   page.reload();page.wait_for_selector('.vehicle-card')
+   expect(page.locator('.sidebar nav').get_by_role('button',name='החלפות רכבים',exact=True)).to_have_count(0)
+   expect(page.locator('.sidebar nav').get_by_role('button',name='מקורות וכללים',exact=True)).to_have_count(0)
+  config['fleet']['showToEmployees']=True;save_config(config)
+  assert query('/data')['fleetVisible']
   today=date.today();assigned=str(today-timedelta(days=548));end=str(today+timedelta(days=548))
   def assignment(e,physical,**overrides):return {'expectedRevision':revision(),'id':physical,'employeeId':e['id'],'carId':e['currentCar'],'assignedOn':assigned,'leaseEndsOn':end,'earlyReturnFee':None,'transferAllowed':True,**overrides}
   reject('/fleet/assignment',assignment(a,'FLEET-PHYSICAL-A',assignedOn=str(today+timedelta(days=1))))

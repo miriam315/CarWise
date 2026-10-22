@@ -42,7 +42,7 @@ public sealed class AdvisorService(ReferenceData data,PayrollEngine engine,Repos
         var e=engine.Validate(profile);
         e=await RefreshKnownParticipationAsync(e,ct);
         var state=e.AdvisorState??new AdvisorState();
-        if(fleet is not null&&fleet.Policy.Enabled&&IntakeFields.Missing(e).Length==0&&FleetRules.Category(text,out var fleetCategory))
+        if(fleet is not null&&fleet.Policy.Enabled&&fleet.Policy.ShowToEmployees&&fleet.Policy.SwapEnabled&&IntakeFields.Missing(e).Length==0&&FleetRules.Category(text,out var fleetCategory))
             return await ReplyAsync(e,state,text,await fleet.Advice(e,fleetCategory,ct),[],ct);
         if(state.Target is not null&&state.Target!="waiver"&&!data.Cars.Any(car=>car.Id==state.Target))state=state with{Target=null};
         // A saved question, rather than model memory or a client's claimed context,

@@ -2,8 +2,8 @@ import {useEffect,useState} from 'react';
 import {ArrowLeftRight,CalendarDays,ShieldCheck,RefreshCw} from 'lucide-react';
 import {api} from './api';
 import './fleet.css';
-export type FleetPolicy={enabled:boolean;replacementMonths:number;swapEnabled:boolean;allowEarlySwap:boolean;requestValidityDays:number;exceptionReasons:string[]};
-export const defaultFleetPolicy:FleetPolicy={enabled:false,replacementMonths:36,swapEnabled:true,allowEarlySwap:true,requestValidityDays:30,exceptionReasons:['role','family','location','medical','vehicle']};
+export type FleetPolicy={enabled:boolean;replacementMonths:number;swapEnabled:boolean;showToEmployees?:boolean;allowEarlySwap:boolean;requestValidityDays:number;exceptionReasons:string[]};
+export const defaultFleetPolicy:FleetPolicy={enabled:false,replacementMonths:36,swapEnabled:true,showToEmployees:true,allowEarlySwap:true,requestValidityDays:30,exceptionReasons:['role','family','location','medical','vehicle']};
 export const reasons:Record<string,string>={role:'שינוי תפקיד או זכאות',family:'שינוי בצורכי המשפחה',location:'שינוי מיקום או נסיעות',medical:'צורך רפואי שאושר',vehicle:'תקלה או בעיה ברכב'};
 export const categoryNames:Record<string,string>={electric:'רכב חשמלי',family:'מסלול ברוכת ילדים',regular:'רכב רגיל'};
 export const statuses:Record<string,string>={pendingConsent:'ממתינה להסכמת הצד השני',pendingOfficer:'שני העובדים הסכימו · ממתינה לקצין הרכב',approved:'אושרה · ממתינה לתיאום מסירה',completed:'הושלמה · המסירה תועדה',rejected:'נדחתה או שהאישור בוטל',withdrawn:'בוטלה'};
@@ -12,10 +12,10 @@ export const date=(s:string)=>new Date(s+'T12:00:00').toLocaleDateString('he-IL'
 export type Assignment={id:string;employeeId:string;carId:string;assignedOn:string;leaseEndsOn:string|null;earlyReturnFee:number|null;transferAllowed:boolean;exceptionReason:string|null;exceptionUntil:string|null};
 export type Proposal={id:string;left:string;right:string;status:string;handedOverOn?:string|null;handoverNote?:string|null;ownConsent?:boolean;valid?:boolean;car?:{model:string}|null;note:string|null};
 type State={revision:number;policy:FleetPolicy;replacement:{status:string;eligibleOn:string|null;canReplace:boolean;message:string;pendingOffers?:number};assignment:Assignment|null;request:{id:string;category:string;expiresAt:string}|null;matches:{requestId:string;car:{model:string;drive:string;year:number};net:{delta:number|null;message:string}}[];proposals:Proposal[];categories:string[];reserved:boolean;notice:string};
-export function FleetReplacementNotice({employeeId,onOpen}:{employeeId:string;onOpen:()=>void}){
+export function FleetReplacementNotice({employeeId,onOpen,showSwap=true}:{employeeId:string;onOpen:()=>void;showSwap?:boolean}){
  const [status,setStatus]=useState<State['replacement']|null>(null);
  useEffect(()=>{let live=true;const refresh=async()=>{try{const next=await api('/fleet/status/'+encodeURIComponent(employeeId));if(live)setStatus(next)}catch{if(live)setStatus(null)}};void refresh();const timer=setInterval(refresh,15000);return()=>{live=false;clearInterval(timer)}},[employeeId]);
- return status&&status.status!=='unconfigured'?<section className="panel fleet-section" aria-label="זמינות החלפת רכב"><p>{status.message}</p>{!!status.pendingOffers&&<p role="status"><strong>קיבלת הצעת החלפה שממתינה לבדיקה ולהסכמה שלך.</strong></p>}<small>השוואת הנטו היא חישוב כספי; מימוש המעבר דורש זכאות במועד ואישור.</small><button className="outline-button" onClick={onOpen}>בדיקת החלפה חכמה או חריג <ArrowLeftRight size={17}/></button></section>:null;
+ return status&&status.status!=='unconfigured'?<section className="panel fleet-section" aria-label="זמינות החלפת רכב"><p>{status.message}</p>{showSwap&&!!status.pendingOffers&&<p role="status"><strong>קיבלת הצעת החלפה שממתינה לבדיקה ולהסכמה שלך.</strong></p>}<small>השוואת הנטו היא חישוב כספי; מימוש המעבר דורש זכאות במועד ואישור.</small>{showSwap&&<button className="outline-button" onClick={onOpen}>בדיקת החלפה חכמה או חריג <ArrowLeftRight size={17}/></button>}</section>:null;
 }
 export default function FleetSwap({employeeId}:{employeeId:string}){
  const [state,setState]=useState<State|null>(null),[error,setError]=useState(''),[busy,setBusy]=useState(false),[category,setCategory]=useState(''),[consent,setConsent]=useState(false);
