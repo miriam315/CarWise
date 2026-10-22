@@ -69,7 +69,12 @@ public static class PayslipExtraction
     }
     public static void MapPayslips(this WebApplication app)
     {
-        app.MapGet("/api/payslip/status",(ConfigurationSnapshot snapshot,SecretVault vault,CancellationToken ct)=>PayslipAvailability.ReadAsync(snapshot.Document.Configuration.Ai,vault,ct));
+        app.MapGet("/api/payslip/status",async(HttpContext context,AccessControl access,ConfigurationSnapshot snapshot,SecretVault vault,CancellationToken ct)=>
+        {
+            context.Response.Headers.CacheControl="no-store";
+            var status=await PayslipAvailability.ReadAsync(snapshot.Document.Configuration.Ai,vault,ct);
+            return access.CanAdmin(context)?(object)status:status.EmployeeView();
+        });
         app.MapPost("/api/payslip/extract",async Task<IResult> (HttpContext context,ConfigurationSnapshot snapshot,AccessControl access,SecretVault vault,
             IHttpClientFactory clients,UsageAccounting accounting,AiKeyHealth health,AiOperationContext operation,CancellationToken ct)=>{
             context.Response.Headers.CacheControl="no-store";
@@ -79,7 +84,7 @@ public static class PayslipExtraction
             if(!consent||!reviewed)throw new ArgumentException("יש לבדוק ולאשר את העותק לאחר השחרה לפני שליחתו ל־AI.");
             var ai=snapshot.Document.Configuration.Ai;
             var status=await PayslipAvailability.ReadAsync(ai,vault,ct);
-            if(!status.Enabled)throw new ArgumentException(status.Message);
+            if(!status.Enabled)throw new ArgumentException("חילוץ תלושים אינו זמין כרגע. אפשר להזין נתונים ידנית או לפנות לתמיכה.");
             operation.ConversationId=employee;
             var bytes=await UploadReader.ReadAsync(context,8*1024*1024,ct);
             try
@@ -91,6 +96,7 @@ public static class PayslipExtraction
             catch(Exception error)when(!ct.IsCancellationRequested&&error is AiUnavailableException or HttpRequestException or OperationCanceledException or System.Text.Json.JsonException)
             {
                 var failure=PayslipFailure.From(error);
+                if(!access.CanAdmin(context))return Results.Json(new{error="לא הצלחנו לחלץ את הנתונים מהתלוש כרגע. אפשר לנסות שוב או להזין את הנתונים ידנית.",code=failure.Code},statusCode:503);
                 return Results.Json(new{error="לא הצלחנו לחלץ את הנתונים מהתלוש כרגע. אפשר לנסות שוב או להזין את הנתונים ידנית.",details=failure.Message,code=failure.Code,failure.ProviderStatus,failure.Parameter},statusCode:503);
             }
         }).WithMetadata(new Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute("documents"));

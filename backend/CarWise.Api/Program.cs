@@ -227,7 +227,7 @@ app.MapGet("/api/data",async(HttpContext context,ConfigurationSnapshot snapshot,
         role=demo?"demo":caller?.IsAdmin==true?"admin":caller?.IsAgent==true?"agent":"employee",employeeId=caller?.EmployeeId};
     return new{currentUser,fleetVisible=snapshot.Document.Configuration.Fleet.ShowToEmployees,
     cars=reference.Cars.Select(reference.Enrich),employees=reference.Employees.Where(e=>demo || context.Items["caller"] is Caller c && (c.IsAdmin||e.Id==c.EmployeeId)),
-    occupations=reference.OccupationDocuments,rules=reference.Rules,officialCount=reference.OfficialRowCount,canAdmin=access.CanAdmin(context),canAgent=demo||context.Items["caller"] is Caller{IsAgent:true},configurationRevision=snapshot.Document.Revision,payslipEnabled=payslipStatus.Enabled,payslipStatus};
+    occupations=reference.OccupationDocuments,rules=reference.Rules,officialCount=reference.OfficialRowCount,canAdmin=access.CanAdmin(context),canAgent=demo||context.Items["caller"] is Caller{IsAgent:true},configurationRevision=snapshot.Document.Revision,payslipEnabled=payslipStatus.Enabled,payslipStatus=access.CanAdmin(context)?(object)payslipStatus:payslipStatus.EmployeeView()};
 });
 void AuthorizeEmployee(HttpContext context,AccessControl access,Employee employee)
 {

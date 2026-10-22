@@ -6,6 +6,7 @@ public sealed record PayslipStatus(bool Enabled,string Code,string Message)
     public int MaxPages {get;init;}=6;
     public string? Provider {get;init;}
     public string? Model {get;init;}
+    public object EmployeeView()=>new{Enabled,Code=Enabled?"ready":"unavailable",Message=Enabled?"חילוץ תלושים זמין. רק העותק שתבדקו ותאשרו יישלח לעיבוד.":"חילוץ תלושים אינו זמין כרגע. אפשר להזין נתונים ידנית או לפנות לתמיכה.",MaxPages};
 }
 public static class PayslipAvailability
 {

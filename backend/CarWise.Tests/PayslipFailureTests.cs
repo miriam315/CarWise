@@ -1,8 +1,19 @@
 using CarWise.Api.AI;
+using CarWise.Api.Domain;
+using System.Text.Json.Nodes;
 using Xunit;
 namespace CarWise.Tests;
 public sealed class PayslipFailureTests
 {
+    [Theory][InlineData(true)][InlineData(false)]
+    public void EmployeeStatusDoesNotExposeModelsProvidersOrConfigurationDiagnostics(bool enabled)
+    {
+        var status=new PayslipStatus(enabled,"key_required","INTERNAL configuration and key diagnostics"){Provider="PRIVATE provider",Model="PRIVATE model"};
+        var json=JsonDefaults.Serialize(status.EmployeeView());var result=JsonNode.Parse(json)!;
+        Assert.Null(result["provider"]);Assert.Null(result["model"]);Assert.DoesNotContain("PRIVATE",json);Assert.DoesNotContain("INTERNAL",json);
+        Assert.Equal(enabled,result["enabled"]!.GetValue<bool>());Assert.Equal(enabled?"ready":"unavailable",result["code"]!.ToString());
+        Assert.Equal("PRIVATE model",status.Model); // Administration retains its diagnostics.
+    }
     [Theory][InlineData(401,"invalid_api_key")][InlineData(429,"insufficient_quota")][InlineData(404,"model_not_found")][InlineData(400,"unsupported_parameter")]
     public void ProviderFailuresKeepSafeActionableDetails(int status,string code)
     {

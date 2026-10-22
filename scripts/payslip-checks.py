@@ -8,8 +8,11 @@ from redacted_payslip_fixture import configure,prepare,extract,mock
 
 def check(query,page,nav,screenshots):
     current=query('/admin/configuration');draft=deepcopy(current['configuration']);keys=configure(draft)
+    draft['ai']['models'][0]['profile']['displayName']='PRIVATE-AI-PROFILE'
     query('/admin/configuration',{'expectedRevision':current['revision'],'configuration':draft,'apiKeys':keys,'note':'Synthetic redaction UI test; no paid provider'})
     page.reload();page.wait_for_selector('.vehicle-card');nav('הנתונים שלי')
+    expect(page.locator('.payslip-panel')).not_to_contain_text('PRIVATE-AI-PROFILE')
+    expect(page.locator('.payslip-panel')).not_to_contain_text('העיבוד מתבצע באמצעות')
     errors=[];requests=[];uploads=[]
     page.on('pageerror',lambda error:errors.append(error.stack or str(error)))
     page.on('request',lambda request:requests.append(request))
