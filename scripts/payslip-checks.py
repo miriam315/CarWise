@@ -111,10 +111,16 @@ def check(query,page,nav,screenshots):
     page.get_by_label('הנחיות לחילוץ תלושים',exact=True).fill(prompt)
     before_ai_save=query('/admin/configuration')
     expect(page.get_by_label('סיבת שינוי הגדרות',exact=True)).to_have_count(0)
-    page.get_by_role('button',name='שמירת הגדרות',exact=True).click()
+    with page.expect_response(lambda response:response.request.method=='POST' and response.url.endswith('/api/admin/configuration')) as saving:
+        page.get_by_role('button',name='שמירת הגדרות',exact=True).click()
+    saved_response=saving.value
+    assert saved_response.ok, f'Configuration save failed: HTTP {saved_response.status}'
+    assert saved_response.json()['configuration']['ai']['payslipPrompt']==prompt
+    expect(page.locator('.admin-success')).to_contain_text('הגדרות ה־AI נשמרו והופעלו')
     expect(page.get_by_label('סיבת שינוי הגדרות',exact=True)).to_have_count(0)
-    assert query('/admin/configuration')['policyRevision']==before_ai_save['policyRevision']
-    assert query('/admin/configuration')['configuration']['ai']['payslipPrompt']==prompt
+    persisted=query('/admin/configuration')
+    assert persisted['policyRevision']==before_ai_save['policyRevision']
+    assert persisted['configuration']['ai']['payslipPrompt']==prompt
     assert not errors,errors
     external=[r.url for r in requests if r.url.startswith('http') and not r.url.startswith(page.url.split('/')[0]+'//'+page.url.split('/')[2])]
     assert not external,external

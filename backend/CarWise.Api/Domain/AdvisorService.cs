@@ -38,7 +38,7 @@ public sealed class AdvisorService(ReferenceData data,PayrollEngine engine,Repos
         var text=request.Text?.Trim()??"";
         if(text.Length is 0 or >2000)throw new ArgumentException("כתבו שאלה עד 2,000 תווים");
         var conversation=await repository.ConversationAsync(request.Employee.Id,ct);
-        var profile=conversation?.Employee??(request.Employee with{AdvisorState=null});
+        var profile=!useTools&&suppliedFields is not null?request.Employee:conversation?.Employee??(request.Employee with{AdvisorState=null});
         if(!canChangeOccupation)profile=profile with{Occupation=request.Employee.Occupation};
         var e=engine.Validate(profile);
         e=await RefreshKnownParticipationAsync(e,ct);
@@ -147,32 +147,32 @@ public sealed class AdvisorService(ReferenceData data,PayrollEngine engine,Repos
         if(missing.Length>0)
         {
             var next=missing[0];var choices=next=="currentCar"?data.Cars.Select(car=>car.Id).ToList():new List<string>();
-            return await ReplyAsync(e,new(next,target,wantsElectric,candidates.ToArray()),text,IntakeFields.Question(next,data),choices,ct,aiFallback);
+            return await ReplyAsync(e,new(next,target,wantsElectric,candidates.ToArray(),state.RequestedCategory),text,IntakeFields.Question(next,data),choices,ct,aiFallback);
         }
         if(target is null&&candidates.Count==0&&(ParticipationRules.OutsideCatalogue(text)||fields.RequestedModel is {Length:>0} requestedHint&&text.Contains(requestedHint,StringComparison.OrdinalIgnoreCase)))
         {
             var outsideHint=fields.RequestedModel??text;
             var ticketTarget=ParticipationRules.CatalogueTarget(outsideHint);
-            e=e with{AdvisorState=new("catalogueVehicle",null,wantsElectric)};
+            e=e with{AdvisorState=new("catalogueVehicle",null,wantsElectric,RequestedCategory:state.RequestedCategory)};
             await repository.CreateTicketAsync(e,ticketTarget,"בדיקת רכב שאינו בקטלוג: "+outsideHint+". נדרשים זיהוי רשמי, זכאות והשתתפות; אין לאשר חישוב לפני הוספת נתוני מקור.",ct,appendAnnouncement:!suppressMessages);
             return await ReplyAsync(e,e.AdvisorState,text,"לא נמצאה התאמה לרכב בקטלוג. העברתי שאלה לנציג; לא אנחש השתתפות או שווי שימוש ולא אציג נטו לרכב הזה. אחרי השלמת הקטלוג נוכל להמשיך בהשוואה.",[],ct);
         }
         if(target is not null&&data.Cars.Any(c=>c.Id==target))
         {
             if(!engine.Eligibility(e,data.Cars.Single(c=>c.Id==target)).Eligible)
-                return await ReplyAsync(e,new(null,target,wantsElectric),text,"החלופה אינה בקבוצת הזכאות שלך. אפשר לבחור חלופה אחרת מהקטלוג.",[],ct);
+                return await ReplyAsync(e,new(null,target,wantsElectric,RequestedCategory:state.RequestedCategory),text,"החלופה אינה בקבוצת הזכאות שלך. אפשר לבחור חלופה אחרת מהקטלוג.",[],ct);
             decimal? reported=fields.TargetParticipation;
             if(reported is null&&request.Target is not null)reported=(await new LocalExtractionService().ExtractAsync(text,e,[],ct)).TargetParticipation;
             if(awaiting=="targetParticipation"&&IntakeFields.TryNumber(text,"participation",out var amount))reported=amount;
             if(reported is not null)await repository.ReportParticipationAsync(e.Id,target,reported.Value,ct);
             if(fields.ParticipationNeedsApproval||ParticipationRules.ApprovalRequested(text))
             {
-                e=e with{AdvisorState=new("targetParticipation",target,wantsElectric)};
+                e=e with{AdvisorState=new("targetParticipation",target,wantsElectric,RequestedCategory:state.RequestedCategory)};
                 await repository.CreateTicketAsync(e,target,"העובד מבקש אישור השתתפות אישית לרכב החדש: "+text,ct);
                 return await ReplyAsync(e,e.AdvisorState,text,"שלחתי לנציג בקשה לאישור ההשתתפות האישית שלך. ברירת המחדל מהקטלוג אינה מוצגת כעת כסכום סופי עבורך; ההשוואה לרכב הזה ממתינה לאישור.",[],ct);
             }
         }
-        e=e with{AdvisorState=new(null,target,wantsElectric)};
+        e=e with{AdvisorState=new(null,target,wantsElectric,RequestedCategory:state.RequestedCategory)};
         var simulation=await SimulateAsync(e,ct);
         string reply;string? nextAwaiting=null;
         if(target is not null)
@@ -188,14 +188,16 @@ public sealed class AdvisorService(ReferenceData data,PayrollEngine engine,Repos
             else reply=!useTools?FinancialText.Template(result):await NarrateAsync(result,ct);
         }
         else if(candidates.Count>0)reply="כדי לזהות את הרכב לפי המפתח הרשמי, בחרו את הדגם המדויק מהרשימה. שם מסחרי לבדו לא מספיק.";
-        else if(wantsElectric)
+        else if(wantsElectric||state.RequestedCategory is "family" or "regular")
         {
-            candidates=simulation.Results.Where(r=>r.Eligible&&!r.Pending&&r.Car?.Drive=="חשמלי").OrderByDescending(r=>r.Net).Take(3).Select(r=>r.Id).ToList();
-            reply="הנה רכבים חשמליים שמתאימים לקבוצת הזכאות שלך, לפי הנטו הגבוה ביותר. בחרו דגם מדויק כדי להציג חישוב והסבר.";
+            var category=wantsElectric?"electric":state.RequestedCategory!;
+            candidates=simulation.Results.Where(r=>r.Eligible&&!r.Pending&&r.Car is {} car&&FleetRules.Accepts(category,car)).OrderByDescending(r=>r.Net).Take(3).Select(r=>r.Id).ToList();
+            var label=category=="electric"?"חשמליים":category=="family"?"במסלול המשפחתי":"במסלול הרגיל";
+            reply=candidates.Count>0?$"הנה רכבים {label} שמתאימים לזכאות שלך. איזה דגם תרצו להשוות?":"לא נמצאו כרגע רכבים זמינים במסלול המבוקש לפי הזכאות והנתונים המאושרים שלך.";
         }
         else reply="אפשר להשוות רכב מסוים, לבדוק מעבר לחשמלי או לשאול על ויתור על הרכב. בחרו דגם מהקטלוג או כתבו את שמו. נתוני השכר וההפרשות ניתנים לעדכון דרך ״הנתונים שלי״.";
         if(fields.HasUpdates||answered)reply="עדכנתי את הנתונים שמסרת ושמרתי אותם.\n"+reply;
-        return await ReplyAsync(e,new(nextAwaiting,target,wantsElectric,candidates.ToArray()),text,reply,candidates,ct,aiFallback);
+        return await ReplyAsync(e,new(nextAwaiting,target,wantsElectric,candidates.ToArray(),state.RequestedCategory),text,reply,candidates,ct,aiFallback);
     }
     private async Task<string> NarrateAsync(Alternative result,CancellationToken ct)
     {
