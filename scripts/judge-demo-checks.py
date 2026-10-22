@@ -65,6 +65,9 @@ def check(query,page,nav,screenshots):
     dialog.get_by_role('button',name='סגירת פירוט',exact=True).click()
 
     nav('מרכז הנציגים')
+    expect(page.locator('.agent-stats>.panel')).to_have_count(2)
+    expect(page.locator('.agent-stats')).not_to_contain_text('Supabase')
+    expect(page.locator('.agent-stats')).not_to_contain_text('הפניות והתשובות נשמרות בשרת')
     ticket=page.locator('.ticket-card').filter(has=page.get_by_role('heading',name=employee['name'],exact=True))
     ticket.get_by_label('השתתפות עובד מאושרת (₪)',exact=True).fill('300')
     ticket.get_by_label('תשובת הנציג',exact=True).fill('אושרה השתתפות חודשית של 300 ₪ — הדגמה סינתטית')

@@ -24,6 +24,7 @@ public sealed class ConfigurationValidator(ReferenceData officialSource)
                     Fail("סדרת 360° מוגבלת ל־48 צילומים שונים; אין לשכפל תמונה באותה קבוצת תצוגה.");
             }
             Unique(config.Occupations.Select(o=>o["occupation"].GetString()!),"עיסוקים");
+            if(config.EmployeeAccountRoles is null||config.EmployeeAccountRoles.Any(pair=>!config.Employees.Any(e=>e.Id==pair.Key)||pair.Value is not ("employee" or "agent" or "admin")))Fail("הרשאות חשבון העובדים אינן תקינות");
             var rules=config.Rules;var groups=rules["groupOrder"]!.AsArray().Select(x=>x!.GetValue<string>()).ToList();
             if(groups.Count is <1 or >10)Fail("מספר קבוצות זכאות לא תקין");Unique(groups,"קבוצות זכאות");
             foreach(var group in groups)Range(rules["budgets"]![group],0,100000,"תקציב קבוצה");

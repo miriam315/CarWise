@@ -11,10 +11,11 @@ namespace CarWise.Tests;
 public sealed class AccountLifecycleTests
 {
     private const string Password = "SYNTHETIC-PASSWORD-ONLY";
-    private static AuthAccounts Accounts(HttpClient http)
+    private static AuthAccounts Accounts(HttpClient http,string? assignedRole=null,string? assignedEmployee=null)
     {
         var data = ReferenceData.FromFiles(Path.Combine(AppContext.BaseDirectory, "data"));
         var configuration = new ManagedConfiguration(data.Rules, data.Cars, data.OccupationDocuments, data.Employees, new(false, new(), new()));
+        if(assignedRole is not null&&assignedEmployee is not null)configuration=configuration with{EmployeeAccountRoles=new(){{assignedEmployee,assignedRole}}};
         var state = new ConfigurationState(new(new(0, DateTimeOffset.UtcNow, "test", "initial", configuration, []), data));
         return new(http, new MemoryConfigurationDatabase(), state);
     }
@@ -52,7 +53,7 @@ public sealed class AccountLifecycleTests
             body["id"] = Guid.NewGuid().ToString();
             return new(HttpStatusCode.OK) { Content = JsonContent.Create(body) };
         })) { BaseAddress = new("https://accounts.invalid/") };
-        var account = await Accounts(http).CreateAsync(new("worker@example.test", Password, role, employeeId), default);
+        var account = await Accounts(http,role,employeeId).CreateAsync(new("worker@example.test", Password, role, employeeId), default);
         Assert.Equal(role, account.Role);
         Assert.Equal(employeeId, account.EmployeeId);
         Assert.DoesNotContain(Password, JsonDefaults.Serialize(account));
@@ -71,7 +72,7 @@ public sealed class AccountLifecycleTests
             if (request.Method != HttpMethod.Get) posts++;
             return new(HttpStatusCode.OK) { Content = new StringContent("""{"users":[{"id":"existing","email":"worker@example.test","app_metadata":{"role":"employee","employee_id":"E-001"}}]}""") };
         })) { BaseAddress = new("https://accounts.invalid/") };
-        await Assert.ThrowsAsync<ArgumentException>(() => Accounts(http).CreateAsync(new(email, Password, role, employeeId), default));
+        await Assert.ThrowsAsync<ArgumentException>(() => Accounts(http,role,employeeId).CreateAsync(new(email, Password, role, employeeId), default));
         Assert.Equal(0, posts);
     }
 

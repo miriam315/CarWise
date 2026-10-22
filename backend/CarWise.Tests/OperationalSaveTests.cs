@@ -81,6 +81,32 @@ public sealed class OperationalSaveTests
         Assert.Equal(2,restored.PolicyVersion);Assert.Equal(250,restored.Configuration.Rules["electric"]!["netBonus"]!.GetValue<int>());
         Assert.Equal("gpt-4.1-nano",restored.Configuration.Ai.Extraction.Model);
     }
+    [Fact] public async Task AccountRoleAssignmentIsOperationalAndSurvivesPolicyRestore()
+    {
+        var (service,db,vault,initial)=Setup();var config=initial.Document.Configuration;
+        var id=config.Employees[0].Id;
+        var saved=await service.SaveAsync(new(0,config with{EmployeeAccountRoles=new(){{id,"agent"}}},""),"admin",default);
+        Assert.Equal(0,saved.PolicyVersion);Assert.Empty(saved.History);Assert.Contains(id,Assert.Single(saved.Operations).EmployeeIds);
+        var second=new ConfigurationService(db,new(initial),new(Source),vault);await second.RefreshAsync(default);
+        Assert.Equal("agent",second.State.Current.Document.Configuration.EmployeeAccountRoles[id]);
+        var policy=JsonDefaults.Read<ManagedConfiguration>(JsonDefaults.Serialize(saved.Configuration));policy.Rules["electric"]!["netBonus"]=500;
+        var changed=await service.SaveAsync(new(saved.Revision,policy,"electric policy"),"admin",default);
+        var restored=await service.RestoreAsync(new(changed.Revision,0,"restore policy"),"admin",default);
+        Assert.Equal("agent",restored.Configuration.EmployeeAccountRoles[id]);
+        await Assert.ThrowsAsync<ArgumentException>(()=>service.SaveAsync(new(restored.Revision,restored.Configuration with{EmployeeAccountRoles=new(){{id,"invented"}}},""),"admin",default));
+    }
+    [Fact] public async Task NewOccupationRequiresExplicitPolicyAndControlsPayrollEligibility()
+    {
+        var (service,_,_,initial)=Setup();var config=JsonDefaults.Read<ManagedConfiguration>(JsonDefaults.Serialize(initial.Document.Configuration));
+        var occupation=JsonDefaults.Read<Dictionary<string,System.Text.Json.JsonElement>>("""{"occupation":"Synthetic free-text occupation","group":"א","mandatory":false,"waiver":true,"maintenance":321}""");
+        config.Occupations.Add(occupation);
+        var employee=config.Employees[0] with{Id="E-NEW-OCCUPATION",Occupation="Synthetic free-text occupation",CurrentCar=null};config.Employees.Add(employee);
+        await Assert.ThrowsAsync<ArgumentException>(()=>service.SaveAsync(new(0,config,""),"admin",default));
+        var saved=await service.SaveAsync(new(0,config,"approved eligibility for new occupation"),"admin",default);
+        Assert.Equal(1,saved.PolicyVersion);
+        var engine=new PayrollEngine(service.State.Current.Data);Assert.Equal("א",engine.Validate(employee).Group);
+        Assert.Equal(321m,engine.Calculate(employee,null).Maintenance);
+    }
     [Fact] public async Task SavingWithoutAnyChangesCreatesNeitherVersionNorOperationalEvent()
     {
         var (service,db,_,initial)=Setup();var saved=await service.SaveAsync(new(0,initial.Document.Configuration,""),"operator",default);

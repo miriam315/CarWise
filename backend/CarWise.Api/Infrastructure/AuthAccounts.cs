@@ -32,7 +32,12 @@ public sealed class AuthAccounts(HttpClient client,IJsonDatabase database,Config
         Password(request.Password);
         if(request.Role is not ("employee" or "agent" or "admin"))throw new ArgumentException("תפקיד חשבון לא נתמך");
         if(request.Role!="admin"&&string.IsNullOrWhiteSpace(request.EmployeeId))throw new ArgumentException("יש לשייך חשבון עובד לפרופיל עובד");
-        if(!string.IsNullOrWhiteSpace(request.EmployeeId)&&!state.Current.Data.Employees.Any(e=>e.Id==request.EmployeeId))throw new ArgumentException("פרופיל העובד אינו קיים במערכת");
+        if(!string.IsNullOrWhiteSpace(request.EmployeeId))
+        {
+            if(!state.Current.Data.Employees.Any(e=>e.Id==request.EmployeeId))throw new ArgumentException("פרופיל העובד אינו קיים במערכת");
+            var assigned=state.Current.Document.Configuration.EmployeeAccountRoles.GetValueOrDefault(request.EmployeeId,"employee");
+            if(request.Role!=assigned)throw new ArgumentException("ההרשאה אינה תואמת לפרופיל העובד. הגדירו ושמרו תחילה הרשאה בפרופיל העובד בניהול.");
+        }
     }
     public async Task<AuthAccount> CreateAsync(CreateAccount request,CancellationToken ct)
     {

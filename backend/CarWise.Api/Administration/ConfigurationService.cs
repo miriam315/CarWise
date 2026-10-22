@@ -115,7 +115,7 @@ public sealed class ConfigurationService(IJsonDatabase database,ConfigurationSta
                 history=history.Take(10).ToList();
             }
             var employeeIds=current.Configuration.Employees.Select(e=>e.Id).Union(config.Employees.Select(e=>e.Id)).Where(id=>
-                !JsonNode.DeepEquals(JsonNode.Parse(JsonDefaults.Serialize(current.Configuration.Employees.SingleOrDefault(e=>e.Id==id))),JsonNode.Parse(JsonDefaults.Serialize(config.Employees.SingleOrDefault(e=>e.Id==id))))).ToList();
+                !JsonNode.DeepEquals(JsonNode.Parse(JsonDefaults.Serialize(current.Configuration.Employees.SingleOrDefault(e=>e.Id==id))),JsonNode.Parse(JsonDefaults.Serialize(config.Employees.SingleOrDefault(e=>e.Id==id))))||current.Configuration.EmployeeAccountRoles.GetValueOrDefault(id,"employee")!=config.EmployeeAccountRoles.GetValueOrDefault(id,"employee")).ToList();
             var carIds=current.Configuration.Cars.Select(c=>c.Id).Union(config.Cars.Select(c=>c.Id)).Where(id=>
                 !JsonNode.DeepEquals(JsonNode.Parse(JsonDefaults.Serialize(current.Configuration.Cars.SingleOrDefault(c=>c.Id==id)?.Photos??[])),JsonNode.Parse(JsonDefaults.Serialize(config.Cars.SingleOrDefault(c=>c.Id==id)?.Photos??[])))).ToList();
             var aiChanged=!JsonNode.DeepEquals(JsonNode.Parse(JsonDefaults.Serialize(current.Configuration.Ai)),JsonNode.Parse(JsonDefaults.Serialize(config.Ai)));
@@ -139,7 +139,7 @@ public sealed class ConfigurationService(IJsonDatabase database,ConfigurationSta
         await RefreshAsync(ct);var current=state.Current.Document;
         var previous=current.History.SingleOrDefault(h=>h.Revision==request.Revision)??throw new ArgumentException("הגרסה אינה בהיסטוריה הזמינה");
         var operational=current.Configuration;
-        var restored=previous.Configuration with{Ai=operational.Ai,Employees=operational.Employees,Cars=previous.Configuration.Cars.Select(c=>c with{Photos=operational.Cars.SingleOrDefault(p=>p.Id==c.Id)?.Photos??[]}).ToList()};
+        var restored=previous.Configuration with{EmployeeAccountRoles=operational.EmployeeAccountRoles,Ai=operational.Ai,Employees=operational.Employees,Cars=previous.Configuration.Cars.Select(c=>c with{Photos=operational.Cars.SingleOrDefault(p=>p.Id==c.Id)?.Photos??[]}).ToList()};
         return await SaveAsync(new(request.ExpectedRevision,restored,request.Note),actor,ct);
     }
 }
