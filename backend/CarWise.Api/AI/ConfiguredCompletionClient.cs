@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net.Http.Headers;
 using CarWise.Api.Accounting;
 using System.Text.Json.Nodes;
@@ -54,7 +55,7 @@ public sealed class AiProviderException(int status,string code) : AiUnavailableE
     }
 }
 /// <summary>Native adapters share a provider-independent structured-completion contract.</summary>
-public sealed class ConfiguredCompletionClient(AiProfile profile,SecretVault vault,IHttpClientFactory clients,string? testKey=null,UsageAccounting? accounting=null,AiKeyHealth? health=null,AiBackupKey? keyToTest=null,IReadOnlyDictionary<string,string>? draftKeys=null) : IAiCompletionClient,IAiToolClient
+public sealed class ConfiguredCompletionClient(AiProfile profile,SecretVault vault,IHttpClientFactory clients,string? testKey=null,UsageAccounting? accounting=null,AiKeyHealth? health=null,AiBackupKey? keyToTest=null,IReadOnlyDictionary<string,string>? draftKeys=null,ILogger<ConfiguredCompletionClient>? logger=null) : IAiCompletionClient,IAiToolClient
 {
     public Task<string> CompleteAsync(string name,JsonNode schema,string instructions,string text,CancellationToken ct)=>ExecuteAsync(name,schema,instructions,text,null,ct);
     public Task<string> CompleteDocumentAsync(string name,JsonNode schema,string instructions,AiDocument document,CancellationToken ct)=>ExecuteAsync(name,schema,instructions,"Extract the explicitly printed payroll fields from the attached document.",document,ct);
@@ -85,7 +86,7 @@ public sealed class ConfiguredCompletionClient(AiProfile profile,SecretVault vau
             if(string.IsNullOrWhiteSpace(key)||!seen.Add(key))continue;
             attempt++;
             var record=accounting is null?null:await accounting.StartAsync(profile,name,deadline.Token,slot.Id,slot.Name,attempt,invocation);
-            JsonNode? usageBody=null;Exception? failure=null;
+            JsonNode? usageBody=null;Exception? failure=null;var started=Stopwatch.GetTimestamp();
             try
             {
                 var result=await SendAsync(name,schema,instructions,text,body=>usageBody=body,document,key,deadline.Token,tools,messages);
@@ -97,7 +98,15 @@ public sealed class ConfiguredCompletionClient(AiProfile profile,SecretVault vau
                 if(!temporary)breaker.Reject(profile,slot.KeyReference,error);
             }
             catch(Exception error){failure=error;if(error is AiProviderException provider)usageBody=provider.UsageBody;throw;}
-            finally{if(record is not null)await accounting!.FinishAsync(record,usageBody,failure);}
+            finally
+            {
+                logger?.Log(failure is null?LogLevel.Information:LogLevel.Warning,new EventId(2001,"AiAttempt"),
+                    "AI {Operation} {Provider} {Model}: attempt {Attempt}, HTTP {Status}, code {Code}, {ElapsedMs} ms",
+                    name,profile.Provider,profile.Model,attempt,failure is null?200:failure is AiProviderException provider?provider.Status:(int?)null,
+                    failure is null?"ok":failure is AiUnavailableException unavailable?unavailable.Code:failure is OperationCanceledException?"timeout":failure.GetType().Name,
+                    Math.Round(Stopwatch.GetElapsedTime(started).TotalMilliseconds,1));
+                if(record is not null)await accounting!.FinishAsync(record,usageBody,failure);
+            }
         }
         if(last is not null)throw last;
         throw new AiUnavailableException("אין מפתח AI זמין כרגע. המפתחות חסרים, מושבתים או בהמתנה לאחר תקלה. אפשר לנסות מאוחר יותר או לבדוק מפתח מסוים בנפרד בניהול.","key_unavailable");

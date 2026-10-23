@@ -69,7 +69,7 @@ public static class IntentEndpoints
             if(!analytics.Policy.AiInsightsEnabled||!ai.Enabled)return Results.Ok(new{insight=cards[0],usedAi=false,status="deterministic",synthetic=request.Synthetic});
             var profile=ai.ProfileFor(ai.Models.Count>0&&ai.ServiceModels.ContainsKey("insights")?"insights":"narration");
             operation.ConversationId="management:intent";
-            var gateway=new ConfiguredCompletionClient(profile,vault,clients,accounting:accounting,health:health);
+            var gateway=new ConfiguredCompletionClient(profile,vault,clients,accounting:accounting,health:health,logger:app.Services.GetRequiredService<ILogger<ConfiguredCompletionClient>>());
             var result=await IntentNarration.Select(gateway,cards,analytics.Policy.Prompt,ct);
             return Results.Ok(new{insight=result.insight,usedAi=result.usedAi,status=result.status,synthetic=request.Synthetic});
         }).WithMetadata(new Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute("intent"));

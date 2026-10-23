@@ -90,7 +90,7 @@ public static class PayslipExtraction
             try
             {
                 return Results.Ok(await ExtractReviewedAsync(bytes,consent,reviewed,ai,snapshot.Document.PolicyVersion,
-                    (profile,document,prompt,token)=>new ConfiguredCompletionClient(profile,vault,clients,accounting:accounting,health:health)
+                    (profile,document,prompt,token)=>new ConfiguredCompletionClient(profile,vault,clients,accounting:accounting,health:health,logger:context.RequestServices.GetRequiredService<ILogger<ConfiguredCompletionClient>>())
                         .CompleteDocumentAsync("extract_payslip",Schema(),prompt,document,token),ct));
             }
             catch(Exception error)when(!ct.IsCancellationRequested&&error is AiUnavailableException or HttpRequestException or OperationCanceledException or System.Text.Json.JsonException)

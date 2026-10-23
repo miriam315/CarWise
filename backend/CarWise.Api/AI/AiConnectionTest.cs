@@ -8,7 +8,7 @@ public sealed record AiConnectionTestResult(bool Success,string Code,string Mess
 public static class AiConnectionTest
 {
     public static async Task<AiConnectionTestResult> RunAsync(TestAiRequest request,SecretVault vault,IHttpClientFactory clients,
-        UsageAccounting? accounting,AiKeyHealth health,CancellationToken ct)
+        UsageAccounting? accounting,AiKeyHealth health,CancellationToken ct,ILogger<ConfiguredCompletionClient>? logger=null)
     {
         ConfigurationValidator.ValidateAi(request.Profile);
         if(request.ApiKey is {Length:>8192})throw new ArgumentException("המפתח ארוך מדי");
@@ -23,7 +23,7 @@ public static class AiConnectionTest
         {
             var client=new ConfiguredCompletionClient(request.Profile,vault,clients,
                 string.IsNullOrWhiteSpace(request.ApiKey)?null:request.ApiKey.Trim(),accounting,
-                request.KeyId is null?health:new AiKeyHealth(),selected,request.ApiKeys);
+                request.KeyId is null?health:new AiKeyHealth(),selected,request.ApiKeys,logger);
             if(request.ToolCalling)
             {
                 var tool=new AiTool("carwise_connection_probe","A harmless synthetic connection test; echo the supplied nonce.",JsonNode.Parse("""{"type":"object","additionalProperties":false,"properties":{"nonce":{"type":"string","enum":["carwise"]}},"required":["nonce"]}""")!.AsObject());

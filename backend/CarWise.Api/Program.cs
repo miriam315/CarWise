@@ -1,3 +1,5 @@
+using CarWise.Api.Diagnostics;
+using System.Diagnostics;
 using CarWise.Api.Accounting;
 using Microsoft.AspNetCore.HttpOverrides;
 using CarWise.Api.Administration;
@@ -12,7 +14,6 @@ using CarWise.Api.Infrastructure;
 using Microsoft.Extensions.FileProviders;
 using Npgsql;
 
-Console.WriteLine("[CarWise] Server process started. Reading saved connection settings...");
 var builder=WebApplication.CreateBuilder(args);
 var root=Environment.GetEnvironmentVariable("CARWISE_ROOT")??FindRoot();
 builder.Configuration.AddJsonFile(Path.Combine(root,".local","appsettings.Development.json"),optional:true,reloadOnChange:false);
@@ -29,6 +30,14 @@ builder.Services.Configure<ForwardedHeadersOptions>(options=>{
 var keyDirectory=Environment.GetEnvironmentVariable("CARWISE_KEYRING_DIR")??Path.Combine(root,".local","admin-keys");
 Directory.CreateDirectory(keyDirectory);
 if(!OperatingSystem.IsWindows())File.SetUnixFileMode(keyDirectory,UnixFileMode.UserRead|UnixFileMode.UserWrite|UnixFileMode.UserExecute);
+var applicationLogs=new ApplicationLogStore(Path.Combine(keyDirectory,"application-logs"));
+var applicationLogProvider=new ApplicationLogProvider(applicationLogs);
+builder.Services.AddSingleton(applicationLogs);
+builder.Logging.AddProvider(applicationLogProvider);
+builder.Services.AddHostedService<ApplicationLogWriter>();
+using var startupLoggerFactory=LoggerFactory.Create(logging=>logging.AddSimpleConsole().AddProvider(applicationLogProvider));
+var startupLogger=startupLoggerFactory.CreateLogger("CarWise.Startup");
+startupLogger.LogInformation("Server process started. Reading saved connection settings...");
 var protection=builder.Services.AddDataProtection().SetApplicationName("CarWise.Administration").PersistKeysToFileSystem(new DirectoryInfo(keyDirectory));
 if(OperatingSystem.IsWindows())protection.ProtectKeysWithDpapi();
 var connectionProtection=DataProtectionProvider.Create(new DirectoryInfo(keyDirectory),options=>{options.SetApplicationName("CarWise.Administration");if(OperatingSystem.IsWindows())options.ProtectKeysWithDpapi();});
@@ -80,19 +89,19 @@ if(!Directory.Exists(dataPath))dataPath=Path.Combine(AppContext.BaseDirectory,"d
 if(args.Contains("--import-data"))
 {
     await repository.SeedAsync(ReferenceData.FromFiles(dataPath));
-    Console.WriteLine("Imported official vehicle data, catalogue, employees, occupations and active rules into "+repository.Provider);
-    return;
+    startupLogger.LogInformation("Imported official vehicle data and reference records into {Provider}",repository.Provider);
+    await applicationLogs.PersistAsync(CancellationToken.None);return;
 }
 var startupTimeout=TimeSpan.FromSeconds(Math.Clamp(builder.Configuration.GetValue("CarWise:StartupTimeoutSeconds",180),30,900));
 ReferenceData reference;
 try
 {
     if(database is PostgresDatabase && !await repository.HasReferenceDataAsync())await repository.SeedAsync(ReferenceData.FromFiles(dataPath));
-    reference=await StartupProgress.RunAsync("Loading reference data from "+repository.Provider,ct=>repository.LoadAsync(ct,count=>Console.WriteLine($"[CarWise] Catalogue official records loaded: {count:N0} (bulk database download is skipped)")),startupTimeout);
+    reference=await StartupProgress.RunAsync("Loading reference data from "+repository.Provider,ct=>repository.LoadAsync(ct,count=>startupLogger.LogInformation("Catalogue official records loaded: {Records}; bulk database download is skipped",count)),startupTimeout,report:message=>startupLogger.LogInformation("{Phase}",message));
 }
 catch(Exception error)when(database is SupabaseDatabase)
 {
-    Console.Error.WriteLine(error is TimeoutException or OperationCanceledException?"[CarWise] Supabase startup timed out. Check the connection/network in the local setup page.":"[CarWise] Supabase reference data could not be loaded. Open localhost to check or replace the saved connection.");
+    startupLogger.LogWarning("Supabase startup failed: {ErrorType}",error.GetType().Name);
     var reason=error is SupabaseRequestException {Status:401 or 403}?
         "Supabase דחה את המפתח או את הרשאותיו. יש לבדוק שהמפתח שייך לפרויקט הנכון ושהוא מפתח שרת בעל הרשאות לנתוני CarWise.":
         error is SupabaseRequestException {Status:404}?
@@ -133,18 +142,18 @@ builder.Services.AddHttpClient("AiCustomProviders").ConfigurePrimaryHttpMessageH
 builder.Services.AddHttpClient("AiProviders").ConfigurePrimaryHttpMessageHandler(()=>new SocketsHttpHandler{AllowAutoRedirect=false,UseCookies=false});
 builder.Services.AddScoped<IDataExtractionService>(sp=>{
     var ai=sp.GetRequiredService<ConfigurationSnapshot>().Document.Configuration.Ai;
-    return ai.Enabled?new AiExtractionService(new ConfiguredCompletionClient(ai.ProfileFor("extraction"),sp.GetRequiredService<SecretVault>(),sp.GetRequiredService<IHttpClientFactory>(),accounting:sp.GetRequiredService<UsageAccounting>(),health:sp.GetRequiredService<AiKeyHealth>()),ai.ExtractionPrompt):new LocalExtractionService();
+    return ai.Enabled?new AiExtractionService(new ConfiguredCompletionClient(ai.ProfileFor("extraction"),sp.GetRequiredService<SecretVault>(),sp.GetRequiredService<IHttpClientFactory>(),accounting:sp.GetRequiredService<UsageAccounting>(),health:sp.GetRequiredService<AiKeyHealth>(),logger:sp.GetRequiredService<ILogger<ConfiguredCompletionClient>>()),ai.ExtractionPrompt):new LocalExtractionService();
 });
 builder.Services.AddScoped<IResponseNarrationService>(sp=>{
     var ai=sp.GetRequiredService<ConfigurationSnapshot>().Document.Configuration.Ai;
-    return ai.Enabled?new AiNarrationService(new ConfiguredCompletionClient(ai.ProfileFor("narration"),sp.GetRequiredService<SecretVault>(),sp.GetRequiredService<IHttpClientFactory>(),accounting:sp.GetRequiredService<UsageAccounting>(),health:sp.GetRequiredService<AiKeyHealth>()),sp.GetRequiredService<ILogger<AiNarrationService>>(),ai.NarrationPrompt):new TemplateNarrationService();
+    return ai.Enabled?new AiNarrationService(new ConfiguredCompletionClient(ai.ProfileFor("narration"),sp.GetRequiredService<SecretVault>(),sp.GetRequiredService<IHttpClientFactory>(),accounting:sp.GetRequiredService<UsageAccounting>(),health:sp.GetRequiredService<AiKeyHealth>(),logger:sp.GetRequiredService<ILogger<ConfiguredCompletionClient>>()),sp.GetRequiredService<ILogger<AiNarrationService>>(),ai.NarrationPrompt):new TemplateNarrationService();
 });
 builder.Services.AddSingleton(new AccessControl(SupabaseClient(),demo));
 builder.Services.AddSingleton(new AuthAccounts(SupabaseClient(),database,state));
 builder.Services.AddScoped<AdvisorToolConversation>(sp=>{
     var ai=sp.GetRequiredService<ConfigurationSnapshot>().Document.Configuration.Ai;
     if(!ai.Enabled)return null!;
-    var client=new ConfiguredCompletionClient(ai.ProfileFor("extraction"),sp.GetRequiredService<SecretVault>(),sp.GetRequiredService<IHttpClientFactory>(),accounting:sp.GetRequiredService<UsageAccounting>(),health:sp.GetRequiredService<AiKeyHealth>());
+    var client=new ConfiguredCompletionClient(ai.ProfileFor("extraction"),sp.GetRequiredService<SecretVault>(),sp.GetRequiredService<IHttpClientFactory>(),accounting:sp.GetRequiredService<UsageAccounting>(),health:sp.GetRequiredService<AiKeyHealth>(),logger:sp.GetRequiredService<ILogger<ConfiguredCompletionClient>>());
     return new(client,sp.GetRequiredService<ReferenceData>(),sp.GetRequiredService<PayrollEngine>(),sp.GetRequiredService<Repository>(),sp.GetRequiredService<ILogger<AdvisorToolConversation>>(),ai.ExtractionPrompt,sp.GetRequiredService<FleetService>(),sp.GetRequiredService<IResponseNarrationService>());
 });
 builder.Services.AddScoped<AdvisorService>();
@@ -160,13 +169,32 @@ var app=builder.Build();
 app.UseForwardedHeaders();
 try
 {
-    await StartupProgress.RunAsync("Loading saved administration settings",async ct=>{await app.Services.GetRequiredService<ConfigurationService>().RefreshAsync(ct);return true;},startupTimeout);
+    await StartupProgress.RunAsync("Loading saved administration settings",async ct=>{await app.Services.GetRequiredService<ConfigurationService>().RefreshAsync(ct);return true;},startupTimeout,report:message=>startupLogger.LogInformation("{Phase}",message));
 }
 catch(Exception)
 {
-    Console.Error.WriteLine("[CarWise] Saved administration settings could not be loaded. Check database access and the active official-data version. No default configuration was activated.");
+    startupLogger.LogError("Saved administration settings could not be loaded. No default configuration was activated.");
+    await applicationLogs.PersistAsync(CancellationToken.None);
     await app.DisposeAsync();throw new InvalidOperationException("CarWise startup failed while loading administration settings. Check the connection and network, then restart.");
 }
+// Record safe route templates and status/timing only. Never log query strings or bodies.
+app.Use(async(context,next)=>{
+    var start=Stopwatch.GetTimestamp();
+    var trace=Activity.Current?.TraceId.ToString()??Guid.NewGuid().ToString("N");
+    context.Response.Headers["X-Request-ID"]=trace;
+    try{await next(context);}
+    finally
+    {
+        if(context.Request.Path.StartsWithSegments("/api")&&context.Request.Path is var requestPath&&
+            requestPath!="/api/health"&&requestPath!="/api/runtime"&&!requestPath.StartsWithSegments("/api/admin/logs"))
+        {
+            var route=(context.GetEndpoint() as RouteEndpoint)?.RoutePattern.RawText??"/api/[unmatched]";
+            var level=context.Response.StatusCode>=500?LogLevel.Error:context.Response.StatusCode>=400?LogLevel.Warning:LogLevel.Information;
+            app.Logger.Log(level,new EventId(1001,"RequestCompleted"),"HTTP {Method} {Route} -> {StatusCode} ({ElapsedMs} ms)",
+                context.Request.Method,route,context.Response.StatusCode,Math.Round(Stopwatch.GetElapsedTime(start).TotalMilliseconds,1));
+        }
+    }
+});
 app.UseRateLimiter();
 app.Use(async(context,next)=>
 {

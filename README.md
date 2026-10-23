@@ -32,6 +32,8 @@ curl --fail http://127.0.0.1:8000/api/health
 
 [מדריך פריסה מפורט](docs/railway.md): שירות Web אחד מקובץ Docker, Supabase קיים ו־Volume קבוע למפתחות. `railway.json` מגדיר בנייה ובדיקת מוכנות.
 
+בניהול → **לוגי מערכת** אפשר לחפש אירועי שרת, זמני בקשות ותקלות AI, לסנן ולייצא JSONL. הלוגים זמינים למנהל בלבד, מוגבלים ל־5,000 רשומות ולשבעה ימים ונשמרים בדיסק הקבוע הקיים. [היקף האיסוף, פרטיות ותפעול](docs/operations-logs.md).
+
 ## חיבור ל־Supabase
 
 המתאם ל־Supabase קיים ב־`backend/CarWise.Api/Infrastructure/Database.cs`. הוא משתמש ב־PostgREST וב־RPC טרנזקציוניים. מפתח השירות נשאר בשרת, ולעולם אינו נכלל בקוד או ב־bundle של React.

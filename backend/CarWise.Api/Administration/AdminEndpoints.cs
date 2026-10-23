@@ -1,3 +1,4 @@
+using CarWise.Api.Diagnostics;
 using CarWise.Api.Accounting;
 using CarWise.Api.AI;
 using CarWise.Api.Domain;
@@ -9,11 +10,8 @@ public static class AdminEndpoints
     public static void MapAdministration(this WebApplication app,string provider,string? supabaseUrl,bool demo)
     {
         var group=app.MapGroup("/api/admin");
-        group.AddEndpointFilter(async(context,next)=>{
-            context.HttpContext.RequestServices.GetRequiredService<AccessControl>().Admin(context.HttpContext);
-            try{return await next(context);}
-            catch(ConfigurationConflictException){return Results.Conflict(new{error="ההגדרות השתנו על ידי מנהל אחר. טענו את הגרסה העדכנית לפני שמירה."});}
-        });
+        group.AddEndpointFilter(AuthorizeAdministrator);
+        group.MapApplicationLogs();
         group.MapGet("/server-connection",(ServerConnectionManager manager,CancellationToken ct)=>manager.ViewAsync(ct));
         group.MapPost("/server-connection",async(SaveServerConnection request,ServerConnectionManager manager,HttpContext context,CancellationToken ct)=>{
             await manager.SaveAsync(request,Actor(context),ct);return LocalSetupAccess.RestartResult(context,app);
@@ -46,8 +44,8 @@ public static class AdminEndpoints
                 server="ASP.NET Core 10",demoMode=demo,keyStorage="ASP.NET Data Protection",revision=settings.State.Current.Document.Revision,
                 note="כתובת Supabase ומפתח השרת נשמרים דרך הניהול; הרשאות הרשת מוגדרות בתשתית האירוח."};
         });
-        group.MapPost("/test-ai",(TestAiRequest request,SecretVault vault,IHttpClientFactory clients,UsageAccounting accounting,AiKeyHealth health,CancellationToken ct)=>
-            AiConnectionTest.RunAsync(request,vault,clients,accounting,health,ct))
+        group.MapPost("/test-ai",(TestAiRequest request,SecretVault vault,IHttpClientFactory clients,UsageAccounting accounting,AiKeyHealth health,ILogger<ConfiguredCompletionClient> logger,CancellationToken ct)=>
+            AiConnectionTest.RunAsync(request,vault,clients,accounting,health,ct,logger))
             .WithMetadata(new Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute("login"));
         group.MapGet("/usage/conversation/{id}",(string id,UsageReports reports,CancellationToken ct)=>reports.ConversationAsync(id,ct));
         group.MapGet("/usage",(string? after,int? limit,UsageReports reports,CancellationToken ct)=>reports.ReadAsync(after,limit,ct));
@@ -83,6 +81,12 @@ public static class AdminEndpoints
                 .OrderByDescending(r=>r.RegistrationYear).ThenBy(r=>r.MakerCode).ThenBy(r=>r.ModelCode).ToList();
             return new{total=rows.Count,page=number,items=rows.Skip(number*20).Take(20).Select(r=>new{r.TaxYear,year=r.RegistrationYear,r.MakerCode,r.ModelCode,model=r.Document.GetValueOrDefault("כינוי מסחרי",""),brand=r.Document.GetValueOrDefault("תוצר",""),description=r.Document.GetValueOrDefault("תאור דגם",""),value=r.Value,drive=source.Rules["valueOfUse"]!["driveField"]![r.Drive]!.GetValue<string>(),price=decimal.Parse(r.Document["מחיר מחירון"],System.Globalization.CultureInfo.InvariantCulture)})};
         });
+    }
+    public static async ValueTask<object?> AuthorizeAdministrator(EndpointFilterInvocationContext context,EndpointFilterDelegate next)
+    {
+        context.HttpContext.RequestServices.GetRequiredService<AccessControl>().Admin(context.HttpContext);
+        try{return await next(context);}
+        catch(ConfigurationConflictException){return Results.Conflict(new{error="ההגדרות השתנו על ידי מנהל אחר. טענו את הגרסה העדכנית לפני שמירה."});}
     }
     private static string Actor(HttpContext context)=>context.Items["caller"] is Caller caller?caller.UserId:"local-development-admin";
 }
