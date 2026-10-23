@@ -6,6 +6,52 @@ from playwright.sync_api import expect
 from redacted_payslip_fixture import configure,prepare,extract,mock
 
 
+def check_camera(page,screenshots):
+    # Deliberately ignore the requested camera aspect ratio, as real devices may do.
+    # Colored margins reveal any difference between the live frame and saved crop.
+    page.evaluate("""() => {window.originalCamera=navigator.mediaDevices.getUserMedia;
+      navigator.mediaDevices.getUserMedia=async constraints=>{
+        window.cameraConstraints=constraints;const c=document.createElement('canvas');
+        [c.width,c.height]=window.cameraSize;const ctx=c.getContext('2d'),ratio=210/297;
+        const w=Math.min(c.width,c.height*ratio),h=w/ratio,x=(c.width-w)/2,y=(c.height-h)/2;
+        ctx.fillStyle='#ff0000';ctx.fillRect(0,0,c.width,c.height);
+        ctx.fillStyle='#00ff00';ctx.fillRect(x,y,w,h);
+        ctx.fillStyle='#0000ff';ctx.fillRect(x,y,w,h*.1);ctx.fillRect(x,y+h*.9,w,h*.1);
+        window.cameraStream=c.captureStream(1);return window.cameraStream;
+      };}""")
+    try:
+        for source,viewport in [([1280,720],{'width':1440,'height':1100}),([1920,1080],{'width':390,'height':844}),([720,1280],{'width':390,'height':844})]:
+            page.set_viewport_size(viewport);page.evaluate('(size)=>window.cameraSize=size',source)
+            page.get_by_role('button',name='צילום תלוש',exact=True).click()
+            dialog=page.get_by_role('dialog',name='צילום תלוש שכר',exact=True)
+            shoot=dialog.get_by_role('button',name='צילום',exact=True);expect(shoot).to_be_enabled()
+            bounds=dialog.locator('.payslip-camera-frame').bounding_box()
+            assert abs(bounds['width']/bounds['height']-210/297)<.003
+            assert bounds['width']<=viewport['width'] and bounds['height']<=viewport['height']*.56
+            assert page.evaluate('window.cameraConstraints.video.aspectRatio.ideal')==210/297
+            shoot.click()
+            preview=dialog.get_by_alt_text('תצוגה מקדימה של התלוש שצולם',exact=True)
+            expect(preview).to_be_visible()
+            page.wait_for_function("document.querySelector('.payslip-camera-frame img')?.naturalWidth>0")
+            result=preview.evaluate("""img=>{const c=document.createElement('canvas');c.width=img.naturalWidth;c.height=img.naturalHeight;
+              const ctx=c.getContext('2d');ctx.drawImage(img,0,0);const pixel=(x,y)=>Array.from(ctx.getImageData(Math.floor(x*c.width),Math.floor(y*c.height),1,1).data).slice(0,3);
+              return {width:c.width,height:c.height,left:pixel(.02,.5),right:pixel(.98,.5),top:pixel(.5,.02),bottom:pixel(.5,.98)};}""")
+            assert result['height']>result['width'] and abs(result['width']/result['height']-210/297)<.003
+            for edge in ['left','right']:assert result[edge][1]>240 and result[edge][0]<20,result
+            for edge in ['top','bottom']:assert result[edge][2]>240 and result[edge][0]<20,result
+            if source==[1280,720]:
+                dialog.get_by_role('button',name='צילום מחדש',exact=True).click()
+                expect(shoot).to_be_enabled();shoot.click();expect(preview).to_be_visible()
+            page.screenshot(path=str(screenshots/('camera-a4-'+str(source[0])+'.png')),full_page=True)
+            dialog.get_by_role('button',name='שימוש בצילום',exact=True).click()
+            expect(dialog).to_have_count(0)
+            expect(page.get_by_label('בדקתי את עמוד 1',exact=True)).to_be_visible()
+            assert page.evaluate("window.cameraStream.getTracks().every(track=>track.readyState==='ended')")
+    finally:
+        page.evaluate('() => {navigator.mediaDevices.getUserMedia=window.originalCamera;}')
+        page.set_viewport_size({'width':1440,'height':1100})
+
+
 def check(query,page,nav,screenshots):
     current=query('/admin/configuration');draft=deepcopy(current['configuration']);keys=configure(draft)
     draft['ai']['models'][0]['profile']['displayName']='PRIVATE-AI-PROFILE'
@@ -16,6 +62,8 @@ def check(query,page,nav,screenshots):
     errors=[];requests=[];uploads=[]
     page.on('pageerror',lambda error:errors.append(error.stack or str(error)))
     page.on('request',lambda request:requests.append(request))
+    check_camera(page,screenshots)
+    assert not [r for r in requests if r.method=='POST' and '/payslip/extract' in r.url]
     expect(page.get_by_label('מיקום עיבוד התלוש')).to_have_count(0)
     values={'salary':18000,'commission':None,'bonus':0,'pension':6,'fund':None,'credits':2.75,'participation':350}
     handler=mock(page,values,uploads)
