@@ -8,13 +8,17 @@ public static class IntakeFields
 {
     public static readonly string[] All=["salary","commission","bonus","pension","fund","credits","children","currentCar","participation"];
     public static bool Known(Employee employee,string field)=>employee.KnownFields is null||employee.KnownFields.Contains(field);
-    public static string[] Missing(Employee employee)=>(string.IsNullOrWhiteSpace(employee.Group)?new[]{"eligibility"}:Array.Empty<string>()).Concat(All.Where(field=>!Known(employee,field)&&!(field=="participation"&&Known(employee,"currentCar")&&employee.CurrentCar is null))).ToArray();
+    public static string[] Missing(Employee employee)=>All.Take(7).Where(field=>!Known(employee,field))
+        .Concat(string.IsNullOrWhiteSpace(employee.Group)?["eligibility"]:Array.Empty<string>())
+        .Concat(!Known(employee,"currentCar")?["currentCar"]:Array.Empty<string>())
+        .Concat(Known(employee,"currentCar")&&employee.CurrentCar is null&&!employee.WaiverPolicyKnown?["occupation"]:Array.Empty<string>())
+        .Concat(!Known(employee,"participation")&&!(Known(employee,"currentCar")&&employee.CurrentCar is null)?["participation"]:Array.Empty<string>()).ToArray();
     public static void ValidateKnowledge(Employee employee)
     {
         if(employee.KnownFields is {} fields&&(fields.Length>All.Length||fields.Distinct().Count()!=fields.Length||fields.Except(All).Any()))throw new ArgumentException("רשימת שדות ידועים אינה תקינה");
     }
     public static void RequireComplete(Employee employee)
-    {if(string.IsNullOrWhiteSpace(employee.Group))throw new ArgumentException("קבוצת הזכאות טרם נקבעה. יש להשלים את השיוך בניהול לפני חישוב נטו.");if(Missing(employee).Length>0)throw new ArgumentException("יש להשלים את נתוני השכר והרכב לפני חישוב נטו. נתון חסר אינו אפס.");}
+    {if(string.IsNullOrWhiteSpace(employee.Group))throw new ArgumentException("קבוצת הזכאות טרם נקבעה. יש להשלים את הקבוצה בשיחה או לברר עם נציג לפני חישוב נטו.");if(Missing(employee).Length>0)throw new ArgumentException("יש להשלים את נתוני השכר והרכב לפני חישוב נטו. נתון חסר אינו אפס.");}
     public static Employee Confirm(Employee employee,params string[] fields)=>employee.KnownFields is null?employee:employee with{KnownFields=employee.KnownFields.Concat(fields).Distinct().ToArray()};
     public static Employee Apply(Employee employee,ExtractedData fields)
     {
@@ -23,7 +27,7 @@ public static class IntakeFields
         return Confirm(updated,confirmed.ToArray());
     }
     public static string Question(string field,ReferenceData data)=>field switch{
-        "eligibility"=>"קבוצת הזכאות שלך טרם נקבעה. יש לפנות למנהל המערכת להשלמת שיוך העיסוק והקבוצה. לאחר השיוך נוכל להמשיך בהשוואה; עד אז לא אציג תקציב או נטו משוער.",
+        "eligibility" or "occupation"=>EligibilityInputs.Question(field,data),
         "salary"=>"מה שכר הבסיס החודשי שלך, לפני עמלות ובונוס?",
         "commission"=>"מה לגבי עמלות מעבר לשכר הבסיס — יש לך, ובאיזה סכום חודשי?",
         "bonus"=>"ומה לגבי בונוס — יש סכום חודשי שצריך להביא בחשבון?",

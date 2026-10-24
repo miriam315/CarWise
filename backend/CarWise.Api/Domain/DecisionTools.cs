@@ -59,7 +59,7 @@ public static class DecisionRoutes
     {
         app.MapPost("/api/decision/analyze",async(DecisionRequest request,HttpContext context,AccessControl access,ConfigurationSnapshot snapshot,Repository repository,CancellationToken ct)=>
         {
-            authorize(context,access,request.Employee);var data=snapshot.Data;var engine=new PayrollEngine(data);
+            authorize(context,access,request.Employee);request=request with{Employee=await repository.ResolveEligibilityAsync(request.Employee,ct)};var data=snapshot.Data;var engine=new PayrollEngine(data);
             var original=engine.Validate(request.Employee);IntakeFields.RequireComplete(original);
             if(request.Axis is not ("commission" or "bonus" or "participation")||request.RangeMaximum<100||request.RangeMaximum>(request.Axis=="participation"?20000:200000))throw new ArgumentException("טווח תרחיש לא תקין");
             if(request.HypotheticalParticipation is <0 or >20000)throw new ArgumentException("השתתפות לתרחיש מחוץ לטווח");
@@ -143,7 +143,7 @@ public static class DecisionRoutes
                         change=new{status="review",message="זהות הרכב בקטלוג השתנתה מאז הבחירה: שנת הרישום או קוד היצרן/דגם שונים. יש לבדוק ולבחור מחדש; לא משווים אוטומטית בין שני רכבים כאילו זה עדכון מס בלבד."};
                     else
                     {
-                        var newEmployee=engine.Validate(choice.Employee);var simulation=engine.Simulate(newEmployee,approved.Overrides,approved.Pending);var after=simulation.Results.Single(r=>r.Id==choice.Target);
+                        var newEmployee=engine.Validate(await repository.ResolveEligibilityAsync(choice.Employee,ct));var simulation=engine.Simulate(newEmployee,approved.Overrides,approved.Pending);var after=simulation.Results.Single(r=>r.Id==choice.Target);
                         var changes=new List<object>();
                         void Changed(string label,decimal oldValue,decimal newValue){if(oldValue!=newValue)changes.Add(new{label,before=oldValue,after=newValue});}
                         if(after.Eligible&&!after.Pending)
@@ -165,7 +165,7 @@ public static class DecisionRoutes
         });
         app.MapPost("/api/decision/choice",async(SaveChoiceRequest request,HttpContext context,AccessControl access,ConfigurationSnapshot snapshot,Repository repository,DecisionStore store,IntentAnalytics intents,CancellationToken ct)=>
         {
-            authorize(context,access,request.Employee);var engine=new PayrollEngine(snapshot.Data);var e=engine.Validate(request.Employee);IntakeFields.RequireComplete(e);
+            authorize(context,access,request.Employee);request=request with{Employee=await repository.ResolveEligibilityAsync(request.Employee,ct)};var engine=new PayrollEngine(snapshot.Data);var e=engine.Validate(request.Employee);IntakeFields.RequireComplete(e);
             var approved=await repository.ParticipationAsync(e.Id,ct);var sim=engine.Simulate(e,approved.Overrides,approved.Pending);
             var chosen=sim.Results.SingleOrDefault(r=>r.Id==request.Target)??throw new ArgumentException("חלופה לא תקינה");
             if(!chosen.Eligible||chosen.Pending)throw new ArgumentException("אפשר לשמור למעקב רק בחירה זכאית שסכומיה ידועים ומאושרים");

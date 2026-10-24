@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parent.parent
 OUTPUT = ROOT / '.local' / 'test-results'
 OUTPUT.mkdir(parents=True, exist_ok=True)
 parser = argparse.ArgumentParser(description=__doc__)
-parser.add_argument('--suite', action='append', choices=['fleet', 'intent', 'innovations', 'car-media', 'judge-demo', 'payslip', 'workspace', 'ai-model', 'employee-setup', 'participation', 'intake', 'logs', 'pricing'])
+parser.add_argument('--suite', action='append', choices=['fleet', 'intent', 'innovations', 'car-media', 'judge-demo', 'payslip', 'workspace', 'ai-model', 'employee-setup', 'participation', 'intake', 'logs', 'pricing', 'eligibility-chat'])
 parser.add_argument('--quick', action='store_true', help='OCR: test 2 documents instead of all 12')
 parser.add_argument('--video', action='store_true', help='Record judge rehearsal; requires Playwright ffmpeg')
 args = parser.parse_args()
@@ -49,7 +49,7 @@ def load_suite(name):
     return module
 
 
-for suite in args.suite or ['fleet', 'intent', 'innovations', 'car-media', 'judge-demo', 'payslip', 'workspace', 'ai-model', 'employee-setup', 'participation', 'intake', 'logs', 'pricing']:
+for suite in args.suite or ['fleet', 'intent', 'innovations', 'car-media', 'judge-demo', 'payslip', 'workspace', 'ai-model', 'employee-setup', 'participation', 'intake', 'logs', 'pricing', 'eligibility-chat']:
     dbname = 'carwise_e2e_' + uuid.uuid4().hex
     test_connection = re.sub(r'(?i)((?:^|;)\s*Database\s*=\s*)[^;]+', lambda m: m[1] + dbname, connection)
     subprocess.run(['docker', 'exec', container, 'createdb', '-U', db_user, dbname], check=True)
@@ -142,7 +142,7 @@ for suite in args.suite or ['fleet', 'intent', 'innovations', 'car-media', 'judg
                     page.screenshot(path=str(OUTPUT / (suite + '-failure.png')), full_page=True)
                     raise
                 browser.close()
-            if suite in ['fleet', 'intent', 'car-media', 'logs', 'pricing']:
+            if suite in ['fleet', 'intent', 'car-media', 'logs', 'pricing', 'eligibility-chat']:
                 path = '/fleet/officer' if suite == 'fleet' else '/data' if suite == 'car-media' else '/admin/logs' if suite == 'logs' else '/admin/pricing/openrouter' if suite == 'pricing' else '/admin/intent/report'
                 before = query(path)
                 stop()

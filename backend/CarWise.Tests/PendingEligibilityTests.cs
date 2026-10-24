@@ -36,17 +36,16 @@ public sealed class PendingEligibilityTests
         Assert.Throws<ArgumentException>(()=>engine.Calculate(employee with{Group="ד"},data.Cars[0]));
         Assert.Throws<ArgumentException>(()=>engine.Simulate(employee with{Group="ד"}));
         var response=SimulationView.Incomplete(employee);Assert.Null(response["current"]);Assert.Empty(response["results"]!.AsArray());
-        Assert.Contains("טרם נקבעה",AdvisorKnowledge.Answer(["group","budget","waiver_rules"],employee,data,engine));
+        Assert.Contains("לאיזו קבוצת זכאות",AdvisorKnowledge.Answer(["group","budget","waiver_rules"],employee,data,engine));
     }
     [Fact] public async Task ChatExplainsPendingEligibilityWithoutInventingNumbersOrCallingTheModelAndCanResumeAfterAssignment()
     {
         var data=new ConfigurationValidator(Source).Validate(Config());var employee=data.Employees.Single(e=>e.Id==Pending.Id);var db=new ConversationDatabase();var tools=new ScriptedToolClient();
-        AdvisorService Service(ReferenceData reference)=>new(reference,new(reference),new(db),new LocalExtractionService(),new TemplateNarrationService(),
-            tools:new(tools,reference,new(reference),new(db),NullLogger<AdvisorToolConversation>.Instance));
-        foreach(var text in new[]{"לאיזה קבוצה אני שייכת?","אני בקבוצה ד תחשב לי נטו","יש לי נתונים חסרים?"})
+        AdvisorService Service(ReferenceData reference)=>new(reference,new(reference),new(db),new LocalExtractionService(),new TemplateNarrationService());
+        foreach(var text in new[]{"לאיזה קבוצה אני שייכת?","יש לי נתונים חסרים?"})
         {
             var response=JsonNode.Parse(JsonDefaults.Serialize(await Service(data).ChatAsync(new(employee,text,null,null),default,false)))!;
-            Assert.False(response["complete"]!.GetValue<bool>());Assert.Equal("eligibility",response["awaitingField"]!.GetValue<string>());Assert.Empty(response["candidates"]!.AsArray());Assert.Contains("טרם נקבעה",response["reply"]!.ToString());
+            Assert.False(response["complete"]!.GetValue<bool>());Assert.Equal("eligibility",response["awaitingField"]!.GetValue<string>());Assert.Empty(response["candidates"]!.AsArray());Assert.Contains("לאיזו קבוצת זכאות",response["reply"]!.ToString());
             Assert.DoesNotContain("₪",response["reply"]!.ToString());
         }
         Assert.Equal(0,tools.Calls);

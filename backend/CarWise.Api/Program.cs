@@ -276,7 +276,7 @@ app.MapPost("/api/profile",async(SimulateRequest request,HttpContext context,Acc
 {
     AuthorizeEmployee(context,access,request.Employee);
     var previous=await repository.ConversationAsync(request.Employee.Id,ct);
-    var employee=engine.Validate(request.Employee with{AdvisorState=previous?.Employee.AdvisorState,ChatHistoryStart=previous?.Employee.ChatHistoryStart??0});
+    var employee=engine.Validate(await repository.ResolveEligibilityAsync(request.Employee with{AdvisorState=previous?.Employee.AdvisorState,ChatHistoryStart=previous?.Employee.ChatHistoryStart??0},ct));
     if(employee.AdvisorState is {} state)employee=employee with{AdvisorState=state with{AwaitingField=IntakeFields.Missing(employee).FirstOrDefault()}};
     await repository.SaveConversationAsync(employee,employee.AdvisorState?.Target,ct);return employee;
 });
@@ -336,7 +336,7 @@ app.MapPost("/api/tickets",async(TicketRequest request,HttpContext context,Acces
 {
     AuthorizeEmployee(context,access,request.Employee);
     var stored=await repository.ConversationAsync(request.Employee.Id,ct);
-    var e=engine.Validate(request.Employee with{AdvisorState=stored?.Employee.AdvisorState});IntakeFields.RequireComplete(e);
+    var e=engine.Validate(await repository.ResolveEligibilityAsync(request.Employee with{AdvisorState=stored?.Employee.AdvisorState},ct));IntakeFields.RequireComplete(e);
     var car=reference.Cars.SingleOrDefault(c=>c.Id==request.Target)??throw new ArgumentException("בחרו רכב מתוך הקטלוג");
     if(!engine.Eligibility(e,car).Eligible)throw new ArgumentException("אין זכאות לרכב המבוקש");
     e=e with{AdvisorState=new("targetParticipation",car.Id,car.Drive=="חשמלי")};
@@ -353,6 +353,17 @@ app.MapPost("/api/tickets/{id:guid}",async(Guid id,AnswerRequest request,HttpCon
     if(ticket is null)return Results.NotFound(new{error="הפנייה לא נמצאה"});
     var conversation=await repository.ConversationAsync(ticket.EmployeeId,ct);
     var e=conversation?.Employee??ticket.Snapshot;
+    if(EligibilityInputs.IsTicket(ticket.Target))
+    {
+        if(ticket.Status=="resolved")return Results.Ok(new{status="resolved"});
+        if(ticket.Target=="eligibility:occupation"&&string.IsNullOrWhiteSpace(request.Occupation))throw new ArgumentException("יש לבחור עיסוק מתועד כדי להשלים את כללי הוויתור");
+        var data=context.RequestServices.GetRequiredService<ReferenceData>();
+        e=await repository.ReportEligibilityAsync(e,request.Group,request.Occupation,"representative",data,ct);
+        var next=await advisor.ContinueAfterEligibilityAsync(e,ct);
+        await repository.ResolveAsync(id,0,request.Answer.Trim(),"הנציג ענה: "+request.Answer.Trim()+"\n"+next.Reply,ct);
+        await repository.SaveConversationAsync(next.Employee,next.Employee.AdvisorState?.Target,ct);
+        return Results.Ok(new{status="resolved",employee=next.Employee});
+    }
     if(ParticipationRules.GeneralTicket(ticket.Target))
     {
         var message="הנציג ענה לגבי הרכב שאינו בקטלוג: "+request.Answer.Trim()+"\nאין עדיין חישוב נטו לרכב שאינו בקטלוג. לאחר השלמת הנתונים בחרו את הדגם המדויק ונמשיך מהנתונים האישיים שכבר נשמרו.";

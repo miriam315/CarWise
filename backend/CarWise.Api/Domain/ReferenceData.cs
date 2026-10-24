@@ -58,6 +58,11 @@ public sealed class ReferenceData
             ?? throw new ArgumentException("יש לבחור עיסוק תקין");
         return new(name,d["group"].GetString()!,d["mandatory"].GetBoolean(),d["waiver"].GetBoolean(),d["maintenance"].GetDecimal());
     }
+    public Occupation OccupationFor(Employee employee)
+    {
+        var company=OccupationFor(employee.Occupation);
+        return company.Group.Length>0||string.IsNullOrWhiteSpace(employee.ResolvedEligibility?.Occupation)?company:OccupationFor(employee.ResolvedEligibility.Occupation);
+    }
     private void Verify()
     {
         if (Official.Count==0 || Cars.Count==0) throw new InvalidDataException("Missing reference data");

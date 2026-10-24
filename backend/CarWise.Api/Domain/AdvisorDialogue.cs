@@ -18,7 +18,7 @@ public static class AdvisorDialogue
     {
         var missing=IntakeFields.Missing(employee);
         if(missing.Length==0)return "לפי הפרטים שאישרת, כל נתוני השכר והרכב הדרושים לחישוב כבר מולאו. לא חסר כרגע נתון אישי לחישוב.";
-        var labels=new Dictionary<string,string>{{"eligibility","קבוצת זכאות מאושרת"},{"salary","שכר בסיס"},{"commission","עמלות"},{"bonus","בונוס"},{"pension","אחוז הפרשת עובד לפנסיה"},{"fund","אחוז הפרשת עובד לקרן השתלמות"},{"credits","נקודות זיכוי"},{"children","מספר ילדים בגיל הזכאות"},{"currentCar","הרכב הנוכחי"},{"participation","ההשתתפות האישית ברכב הנוכחי"}};
+        var labels=new Dictionary<string,string>{{"eligibility","קבוצת זכאות"},{"occupation","עיסוק לבדיקת כללי הוויתור"},{"salary","שכר בסיס"},{"commission","עמלות"},{"bonus","בונוס"},{"pension","אחוז הפרשת עובד לפנסיה"},{"fund","אחוז הפרשת עובד לקרן השתלמות"},{"credits","נקודות זיכוי"},{"children","מספר ילדים בגיל הזכאות"},{"currentCar","הרכב הנוכחי"},{"participation","ההשתתפות האישית ברכב הנוכחי"}};
         return "להשלמת החישוב חסרים: "+string.Join(", ",missing.Select(field=>labels[field]))+". "+IntakeFields.Question(missing[0],data);
     }
     public static HashSet<string> RejectedChoices(AdvisorState state,string? category)
@@ -35,7 +35,7 @@ public static class AdvisorDialogue
     // Only a question is model-authored here. Amounts, eligibility and actions remain server-owned.
     public static bool ValidQuestion(string question,string field)
     {
-        var subject=field switch{"salary"=>"שכר|בסיס","commission"=>"עמל", "bonus"=>"בונוס","pension"=>"פנסי","fund"=>"השתלמות","credits"=>"זיכוי","children"=>"ילד","currentCar"=>"רכב","participation"=>"רכב|השתתפות|מנכ",_=>"(?!)"};
+        var subject=field switch{"salary"=>"שכר|בסיס","commission"=>"עמל", "bonus"=>"בונוס","pension"=>"פנסי","fund"=>"השתלמות","credits"=>"זיכוי","children"=>"ילד","currentCar"=>"רכב","participation"=>"רכב|השתתפות|מנכ","eligibility"=>"קבוצ|זכאות","occupation"=>"תפקיד|עיסוק",_=>"(?!)"};
         var text=question.Replace("{CHILD_AGE}","");
         return question.Length is >5 and <=240&&question.EndsWith('?')&&question.Count(c=>c=='?')==1&&
             (field!="children"||question.Contains("{CHILD_AGE}",StringComparison.Ordinal))&&

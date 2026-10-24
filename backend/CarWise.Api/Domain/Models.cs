@@ -26,6 +26,9 @@ public sealed record Employee
     public string[]? KnownFields {get;init;}
     public AdvisorState? AdvisorState {get;init;}
     public int ChatHistoryStart {get;init;}
+    public string? EligibilitySource {get;init;}="organization";
+    public bool WaiverPolicyKnown {get;init;}=true;
+    [JsonIgnore] public EligibilityEvidence? ResolvedEligibility {get;init;}
     [JsonRequired] public decimal Participation { get; init; }
     public string CurrentModel { get; init; } = "";
     public string Question { get; init; } = "";
@@ -82,7 +85,11 @@ public sealed record Alternative : Amounts
 public sealed record Simulation(Employee Employee, Amounts Current, IReadOnlyList<Alternative> Results);
 public sealed record SimulateRequest(Employee Employee, Dictionary<string, decimal>? Overrides = null);
 public sealed record TicketRequest(Employee Employee, string Target, string? Question);
-public sealed record AnswerRequest(decimal Participation, string Answer);
+public sealed record AnswerRequest(decimal Participation, string Answer)
+{
+    public string? Group {get;init;}
+    public string? Occupation {get;init;}
+}
 public sealed record ChatRequest(Employee Employee, string Text, string? Target, Dictionary<string, decimal>? Overrides);
 public sealed record Ticket(Guid Id, string EmployeeId, Employee Snapshot, string Target, string Question,
     string Status, string? Answer, decimal? Participation, DateTimeOffset Created);

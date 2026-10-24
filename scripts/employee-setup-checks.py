@@ -19,10 +19,10 @@ def check(query,page,nav,screenshots):
     representative=next(e for e in saved['configuration']['employees'] if e['name']=='Synthetic representative')
     assert representative['group']=='' and representative['occupation']=='' and representative['currentCar'] is None
     incomplete=query('/simulate',{'employee':{**representative,'group':'ד'}})
-    assert incomplete['complete'] is False and incomplete['missingFields'][0]=='eligibility' and incomplete['current'] is None and incomplete['results']==[]
+    assert incomplete['complete'] is False and 'eligibility' in incomplete['missingFields'] and incomplete['current'] is None and incomplete['results']==[]
     reply=query('/chat',{'employee':representative,'text':'אני בקבוצה ד, איזה רכב חשמלי מתאים לי?'})
-    assert reply['status']=='needs_eligibility' and reply['employee']['group']=='' and reply['candidates']==[]
-    assert 'טרם נקבעה' in reply['reply'] and '₪' not in reply['reply']
+    assert reply['status']=='needs_input' and reply['employee']['group']=='ד' and reply['employee']['eligibilitySource']=='employee' and reply['candidates']==[]
+    assert reply['awaitingField']=='salary' and '₪' not in reply['reply']
     assert saved['configuration']['employeeAccountRoles'][representative['id']]=='agent'
     # Account UI uses saved assignments, never an arbitrary occupation->role guess.
     accounts=[];created=[]
@@ -48,7 +48,7 @@ def check(query,page,nav,screenshots):
     nav('הסקירה שלי')
     missing=page.get_by_role('heading',name='נשלים רק את מה שחסר.',exact=True)
     expect(missing).to_be_visible()
-    expect(page.get_by_role('status').filter(has_text='קבוצת הזכאות טרם נקבעה')).to_be_visible()
+    assert 'salary' in query('/simulate',{'employee':reply['employee']})['missingFields']
     assert 'NaN' not in page.locator('body').inner_text()
     nav('מרכז הנציגים');expect(missing).to_have_count(0)
     expect(page.locator('.agent-stats>.panel')).to_have_count(2)

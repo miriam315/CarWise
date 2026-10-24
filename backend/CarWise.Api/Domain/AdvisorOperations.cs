@@ -22,6 +22,13 @@ public sealed class AdvisorOperations(ReferenceData data,PayrollEngine engine,Re
         var flow=new AdvisorWorkflow(employee.AdvisorState);flow.ResolveInputs(employee);var missing=IntakeFields.Missing(employee);
         if(missing.Length>0)
         {
+            if(missing[0] is "eligibility" or "occupation")
+            {
+                var field=missing[0];var ticketTarget=field=="occupation"?"eligibility:occupation":"eligibility:group";
+                if((await repository.TicketsAsync(employee.Id,ct)).Any(ticket=>ticket.Target==ticketTarget&&ticket.Status=="pending"))
+                {flow.Ask(field);return Result(employee,flow,"הבירור לגבי "+(field=="occupation"?"העיסוק וכללי הוויתור":"קבוצת הזכאות")+" ממתין לנציג. הנתונים שכבר מסרת נשמרו, ונמשיך כשיגיע המענה.","needs_representative");}
+                flow.Ask(field);flow.OfferAction(new("representative",Field:field));return Result(employee,flow,IntakeFields.Question(field,data),"needs_input");
+            }
             if(missing[0]=="participation"&&employee.CurrentCar is {} current&&(await repository.TicketsAsync(employee.Id,ct)).Any(ticket=>ticket.Target==current&&ticket.Status=="pending"))
             {flow.Wait("participation",current);return Result(employee,flow,"הבירור על ההשתתפות ברכב הנוכחי ממתין לנציג. לא יוצג נטו סופי עד לקבלת תשובה.","needs_representative");}
             flow.Ask(missing[0]);
@@ -33,6 +40,30 @@ public sealed class AdvisorOperations(ReferenceData data,PayrollEngine engine,Re
         if(flow.State.RequestedCategory is {} category)return await BrowseAsync(employee,category,false,ct);
         flow.Clarify("איזו חלופת רכב תרצו לבדוק?");return Result(employee,flow,"איזו חלופת רכב תרצו לבדוק?","needs_clarification");
     }
+    public async Task<AdvisorActionResult> EligibilityAsync(Employee employee,string? group,string? occupation,string text,CancellationToken ct)
+    {
+        var explicitGroup=EligibilityInputs.Group(text,data,employee.AdvisorState?.AwaitingField=="eligibility");var explicitRole=EligibilityInputs.Occupation(text,data);
+        if(group is {Length:>0}&&explicitGroup!=group||occupation is {Length:>0}&&explicitRole!=occupation||string.IsNullOrWhiteSpace(group)&&string.IsNullOrWhiteSpace(occupation))throw new ArgumentException("יש למסור קבוצת זכאות או עיסוק מפורשים, בלי להסיק אותם מהקשר");
+        var company=data.OccupationFor(employee.Occupation);
+        var confirmed=company.Group.Length>0?company.Group:employee.ResolvedEligibility?.Source=="representative"?employee.ResolvedEligibility.Group:null;
+        if(confirmed is {Length:>0}&&group is {Length:>0}&&group!=confirmed)
+        {
+            var unchanged=new AdvisorWorkflow(employee.AdvisorState);unchanged.OfferAction(new("representative",Field:"eligibility"));
+            return Result(employee,unchanged,"לפי הנתון שכבר אושר עבורך, הקבוצה היא "+confirmed+". הדיווח שלך שונה ממנו, ולכן לא אשנה אותו אוטומטית. רוצה שאעביר את הבירור לנציג?","needs_clarification");
+        }
+        employee=await repository.ReportEligibilityAsync(employee,group,occupation,"employee",data,ct);
+        var flow=new AdvisorWorkflow(employee.AdvisorState);flow.ResolveInputs(employee);flow.Applied("eligibility_reported");
+        if(flow.Memory.Pending is {Kind:"representative",Field:"eligibility" or "occupation"})flow.Decline();
+        var result=await ContinueAsync(flow.Attach(employee),ct);
+        return result with{Reply="קבוצת הזכאות עודכנה לפי הדיווח שלך. "+result.Reply};
+    }
+    public async Task<AdvisorActionResult> ReferEligibilityAsync(Employee employee,string field,CancellationToken ct)
+    {
+        var flow=new AdvisorWorkflow(employee.AdvisorState);flow.Ask(field);
+        await repository.CreateTicketAsync(flow.Attach(employee),field=="occupation"?"eligibility:occupation":"eligibility:group",
+            field=="occupation"?"מהו העיסוק לצורך כללי הוויתור ואחזקת הרכב? נדרשת בחירה במיפוי מתועד.":"מהי קבוצת הזכאות של העובד? יש להשלים קבוצה מהמדיניות, ועיסוק אם הוא נדרש לכללי הוויתור.",ct,appendAnnouncement:false);
+        return Result(employee,flow,"שלחתי שאלה לנציג לגבי "+(field=="occupation"?"העיסוק וכללי הוויתור":"קבוצת הזכאות")+". נשמרו הנתונים שכבר מסרת, ונמשיך מאותה נקודה אחרי התשובה.","needs_representative");
+    }
     public async Task<AdvisorActionResult> PayrollAsync(Employee employee,ExtractedData fields,CancellationToken ct)
     {
         if(fields.Occupation is not null)throw new ArgumentException("Conversation cannot change occupation");
@@ -43,7 +74,7 @@ public sealed class AdvisorOperations(ReferenceData data,PayrollEngine engine,Re
     {
         if(IntakeFields.Known(employee,"currentCar")||employee.AdvisorState?.AwaitingField!="currentCar")throw new ArgumentException("No current-car question");
         if(target is not null&&!data.Cars.Any(car=>car.Id==target))throw new ArgumentException("Unknown vehicle");
-        if(target is null&&!data.OccupationFor(employee.Occupation).Waiver)throw new ArgumentException("Company vehicle is required for this occupation");
+        if(target is null&&employee.WaiverPolicyKnown&&!data.OccupationFor(employee).Waiver)throw new ArgumentException("Company vehicle is required for this occupation");
         employee=IntakeFields.Confirm(employee with{CurrentCar=target},"currentCar");
         if(target is null)employee=IntakeFields.Answer(employee,"participation",0);
         employee=await RefreshPersonalAsync(employee,ct);
@@ -120,6 +151,7 @@ public sealed class AdvisorOperations(ReferenceData data,PayrollEngine engine,Re
             return await ApprovalAsync(employee,alternative,"הסכום שסוכם שונה מהקטלוג ונדרש בירור אישי",ct);
         if(pending.Kind=="representative")
         {
+            if(pending.Field is "eligibility" or "occupation")return await ReferEligibilityAsync(employee,pending.Field,ct);
             var subject=pending.Subject=="catalogue_alternative"?(flow.State.RequestedCategory=="electric"?"בירור חלופה חשמלית נוספת לפי זכאות העובד":flow.State.RequestedCategory=="family"?"בירור חלופה נוספת במסלול המשפחתי לפי זכאות העובד":"בירור חלופת רכב נוספת לפי זכאות העובד"):
                 pending.Field is {} field&&IntakeFields.All.Contains(field)?IntakeFields.Question(field,data):pending.Subject??"בירור ייעוץ רכב";
             var target=pending.Field=="participation"&&employee.CurrentCar is {} current?current:ParticipationRules.CatalogueTarget(subject);

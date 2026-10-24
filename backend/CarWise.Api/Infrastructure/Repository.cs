@@ -115,14 +115,51 @@ public sealed class Repository(IJsonDatabase db)
     public async Task<Conversation?> ConversationAsync(string employee,CancellationToken ct=default)
     {
         var rows=await db.ReadAsync("carwise_conversations",new Dictionary<string,string>{{"employee_id",employee}},ct:ct);
-        return rows.Count==0?null:new(Read<Employee>(rows[0]!["employee"]!),rows[0]!["status"]!.GetValue<string>(),rows[0]!["target"]?.GetValue<string>());
+        if(rows.Count==0)return null;
+        var saved=Read<Employee>(rows[0]!["employee"]!);
+        if(saved.EligibilitySource is "employee" or "representative"||string.IsNullOrWhiteSpace(saved.Group))saved=await ResolveEligibilityAsync(saved,ct);
+        return new(saved,rows[0]!["status"]!.GetValue<string>(),rows[0]!["target"]?.GetValue<string>());
+    }
+    private static string EligibilityKey(string employee)=>"employee-eligibility:"+Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(employee)));
+    public async Task<Employee> ResolveEligibilityAsync(Employee employee,CancellationToken ct)
+    {
+        var rows=await db.ReadAsync("carwise_rules",new Dictionary<string,string>{{"id",EligibilityKey(employee.Id)}},ct:ct);
+        var evidence=rows.Count==0?null:Read<EligibilityEvidence>(rows[0]!["document"]!);
+        if(evidence is not null&&(evidence.Source is not ("employee" or "representative")||evidence.Revision<1))throw new InvalidDataException("Invalid eligibility evidence");
+        return employee with{ResolvedEligibility=evidence};
+    }
+    public async Task<Employee> ReportEligibilityAsync(Employee employee,string? group,string? occupation,string source,ReferenceData data,CancellationToken ct)
+    {
+        if(source is not ("employee" or "representative"))throw new ArgumentException("מקור זכאות אינו תקין");
+        var company=data.OccupationFor(employee.Occupation);
+        var role=string.IsNullOrWhiteSpace(occupation)?null:data.OccupationFor(occupation);
+        if(role is not null&&role.Group.Length==0)throw new ArgumentException("לעיסוק שנבחר עדיין אין קבוצת זכאות מתועדת");
+        if(role is not null&&group is {Length:>0}&&role.Group!=group)throw new ArgumentException("הקבוצה אינה תואמת למיפוי העיסוק שנבחר");
+        group=role?.Group??group;
+        if(string.IsNullOrWhiteSpace(group)||!data.Rules["groupOrder"]!.AsArray().Any(value=>value!.GetValue<string>()==group))throw new ArgumentException("יש לבחור קבוצה מהמדיניות הפעילה");
+        if(company.Group.Length>0)
+        {
+            if(group!=company.Group||role is not null&&role.OccupationName!=company.OccupationName)throw new ArgumentException("הזכאות נקבעה במיפוי הארגוני. לשינוי נדרש עדכון מוסמך בניהול.");
+            return new PayrollEngine(data).Validate(employee);
+        }
+        employee=await ResolveEligibilityAsync(employee,ct);var previous=employee.ResolvedEligibility;
+        if(previous is {Source:"representative"}&&source=="employee")
+        {
+            if(previous.Group!=group||occupation is {Length:>0}&&previous.Occupation is not null&&previous.Occupation!=occupation)throw new ArgumentException("קיימת תשובת נציג מאושרת. לשינוי הנתון יש לפנות לנציג.");
+            if(role is null||previous.Occupation==role.OccupationName)return new PayrollEngine(data).Validate(employee);
+        }
+        var rememberedRole=previous?.Occupation is {} priorRole&&data.OccupationFor(priorRole).Group==group?priorRole:null;
+        var next=new EligibilityEvidence(group,role?.OccupationName??rememberedRole,previous?.Source=="representative"&&source=="employee"?"representative":source,DateTimeOffset.UtcNow)
+        {Revision=(previous?.Revision??0)+1,OccupationSource=role is not null?source:rememberedRole is not null?previous?.OccupationSource:null};
+        if(!await db.TryWriteRuleAsync(EligibilityKey(employee.Id),previous?.Revision,System.Text.Json.Nodes.JsonNode.Parse(JsonDefaults.Serialize(next))!,ct))throw new CarWise.Api.Administration.ConfigurationConflictException();
+        return new PayrollEngine(data).Validate(employee with{ResolvedEligibility=next});
     }
     private Task<JsonArray> GeneralTicketRows(Guid id,CancellationToken ct)=>db.ReadAsync("carwise_rules",new Dictionary<string,string>{{"id","catalogue-ticket:"+id}},ct:ct);
     private async Task<JsonNode?> GeneralTicketDocument(Guid id,CancellationToken ct)=>(await GeneralTicketRows(id,ct)).FirstOrDefault()?["document"];
     public async Task<Ticket> CreateTicketAsync(Employee e,string target,string question,CancellationToken ct=default,bool appendAnnouncement=true)
     {
         if(!ParticipationRules.GeneralTicket(target))return TicketFrom(await db.RpcAsync("carwise_create_ticket",new(){["p_employee"]=JsonNode.Parse(JsonDefaults.Serialize(e)),["p_target"]=target,["p_question"]=question},ct));
-        // Nonfinancial catalogue requests do not pretend to be cars or bypass the financial ticket FK.
+        // Nonfinancial requests use the existing JSON store without pretending to be cars.
         var id=new Guid(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(e.Id+"/"+target)).AsSpan(0,16));
         var previous=await GeneralTicketDocument(id,ct);
         if(previous?["status"]?.GetValue<string>()=="pending")return TicketFrom(previous);
@@ -131,8 +168,8 @@ public sealed class Repository(IJsonDatabase db)
         if(previous is not null){history.Add(new JsonObject{["answer"]=previous["answer"]?.DeepClone(),["resolved_at"]=previous["resolved_at"]?.DeepClone()});while(history.Count>20)history.RemoveAt(0);}
         var document=new JsonObject{["revision"]=(revision??0)+1,["id"]=id.ToString(),["employee_id"]=e.Id,["snapshot"]=JsonNode.Parse(JsonDefaults.Serialize(e)),["target"]=target,["question"]=question,["status"]="pending",["answer"]=null,["participation"]=null,["created"]=DateTimeOffset.UtcNow.ToString("O"),["history"]=history};
         if(!await db.TryWriteRuleAsync("catalogue-ticket:"+id,revision,document,ct))throw new CarWise.Api.Administration.ConfigurationConflictException();
-        if(appendAnnouncement)await AddMessageAsync(e.Id,"assistant","הפנייה לגבי הרכב שאינו בקטלוג הועברה לנציג. לא מוצג חישוב כספי לרכב הזה.",ct);
-        await SaveConversationAsync(e,null,ct);return TicketFrom(document);
+        if(appendAnnouncement)await AddMessageAsync(e.Id,"assistant",EligibilityInputs.IsTicket(target)?"הבירור לגבי הזכאות הועבר לנציג. הנתונים שנמסרו והשוואת הרכב נשמרו להמשך.":"הפנייה לגבי הרכב שאינו בקטלוג הועברה לנציג. לא מוצג חישוב כספי לרכב הזה.",ct);
+        await SaveConversationAsync(e,EligibilityInputs.IsTicket(target)?e.AdvisorState?.Target:null,ct);return TicketFrom(document);
     }
     public async Task<Ticket> ResolveAsync(Guid id,decimal participation,string answer,string message,CancellationToken ct=default)
     {

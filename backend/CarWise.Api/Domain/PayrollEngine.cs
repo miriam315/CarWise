@@ -13,7 +13,9 @@ public sealed class PayrollEngine(ReferenceData data)
         IntakeFields.ValidateKnowledge(e);
         if(e.Occupation is null||e.Occupation.Length>100)throw new ArgumentException("עיסוק אינו תקין");
         if(string.IsNullOrWhiteSpace(e.Occupation))e=e with{Occupation=data.Employees.SingleOrDefault(source=>source.Id==e.Id)?.Occupation??""};
-        var o=data.OccupationFor(e.Occupation);
+        var company=data.OccupationFor(e.Occupation);var o=data.OccupationFor(e);
+        var group=o.Group.Length>0?o.Group:e.ResolvedEligibility?.Group??"";
+        if(group.Length>0&&!data.Rules["groupOrder"]!.AsArray().Any(value=>value!.GetValue<string>()==group))throw new ArgumentException("קבוצת זכאות אינה מוגדרת במדיניות הפעילה");
         foreach(var (value,max,name) in new[]{(e.Salary,200000m,"salary"),(e.Commission,200000m,"commission"),
             (e.Bonus,200000m,"bonus"),(e.Pension,20m,"pension"),(e.Fund,20m,"fund"),(e.Credits,30m,"credits"),
             (e.Children,30m,"children"),(e.Participation,20000m,"participation")})
@@ -21,12 +23,13 @@ public sealed class PayrollEngine(ReferenceData data)
         if(decimal.Truncate(e.Children)!=e.Children) throw new ArgumentException("מספר הילדים חייב להיות שלם");
         if(e.CurrentCar is not null && !data.Cars.Any(c=>c.Id==e.CurrentCar)) throw new ArgumentException("הרכב הנוכחי אינו בקטלוג");
         if(o.Group.Length>0 && IntakeFields.Known(e,"currentCar") && e.CurrentCar is null && !o.Waiver) throw new ArgumentException("בעיסוק זה נדרש רכב נוכחי");
-        return e with {Group=o.Group};
+        return e with {Group=group,WaiverPolicyKnown=o.Group.Length>0,EligibilitySource=company.Group.Length>0?"organization":e.ResolvedEligibility?.Source};
     }
     public (bool Eligible,string Reason) Eligibility(Employee e,Car? car)
     {
-        var o=data.OccupationFor(e.Occupation);
-        if(o.Group.Length==0)return(false,"קבוצת הזכאות טרם נקבעה; יש להשלים את השיוך לפני בחירת חלופה.");
+        var o=data.OccupationFor(e);var group=o.Group.Length>0?o.Group:e.ResolvedEligibility?.Group??"";
+        if(group.Length==0)return(false,"קבוצת הזכאות טרם נקבעה; יש להשלים את השיוך לפני בחירת חלופה.");
+        if(car is null&&o.Group.Length==0)return(false,"כללי הוויתור ואחזקת הרכב טרם ידועים. נדרשת השלמת עיסוק או בירור נציג.");
         if(car is null) return (o.Waiver,o.Waiver?"העיסוק מאפשר ויתור על רכב":"בתפקיד שטח הרכב הוא כלי עבודה ולכן אי אפשר לוותר עליו");
         if(car.Group=="משפחתי")
         {
@@ -35,12 +38,13 @@ public sealed class PayrollEngine(ReferenceData data)
         }
         var order=data.Rules["groupOrder"]!.AsArray().Select(x=>x!.GetValue<string>()).ToList();
         var ownOnly=data.Rules["chooseFrom"]!.GetValue<string>()=="own_group_only";
-        var eligible=ownOnly?car.Group==o.Group:order.IndexOf(car.Group)<=order.IndexOf(o.Group);
+        var eligible=ownOnly?car.Group==group:order.IndexOf(car.Group)<=order.IndexOf(group);
         return (eligible,eligible?(ownOnly?"הרכב בקבוצת הזכאות שלך":"הרכב בקבוצת הזכאות שלך או בקבוצה נמוכה ממנה"):(ownOnly?"המדיניות מאפשרת בחירה רק מתוך קבוצת הזכאות שלך":"הרכב בקבוצה גבוהה מקבוצת הזכאות שלך"));
     }
     public Amounts Calculate(Employee employee,Car? car,decimal? participation=null)
     {
-        var e=Validate(employee);IntakeFields.RequireComplete(e);var occupation=data.OccupationFor(e.Occupation);
+        var e=Validate(employee);IntakeFields.RequireComplete(e);var occupation=data.OccupationFor(e);
+        if(car is null&&occupation.Group.Length==0)throw new ArgumentException("נדרשים כללי ויתור ואחזקת רכב ממיפוי עיסוק מתועד");
         var gross=e.Salary+e.Commission+e.Bonus;
         var maintenance=car is null?occupation.Maintenance:0m;var value=car is null?0m:data.Lookup(car).Value;
         var contributions=N["contributionsBase"]!.GetValue<string>()=="base"?e.Salary:gross;
@@ -50,7 +54,7 @@ public sealed class PayrollEngine(ReferenceData data)
         if(car is {ParticipationKnown:false}&&participation is null)throw new ArgumentException("סכום ההשתתפות אינו ידוע; נדרש אישור נציג לפני חישוב.");
         var part=car is null?0m:participation??car.Participation;
         if(part<0 || part>20000) throw new ArgumentException("השתתפות לא תקינה");
-        var budget=Number(data.Rules["budgets"]![occupation.Group]);
+        var budget=Number(data.Rules["budgets"]![e.Group]);
         var family=car?.Group=="משפחתי"?Math.Max(0m,car.Cost-budget)*Number(data.Rules["familyTrack"]!["gapSplitEmployee"]):0m;
         (decimal Net,decimal Tax,decimal Insurance,decimal Taxable) Payroll(decimal extra)
         {
