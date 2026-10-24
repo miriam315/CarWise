@@ -95,7 +95,7 @@ public sealed class Repository(IJsonDatabase db)
         for(var offset=Math.Max(0,skip);;)
         {
             var rows=await db.ReadAsync("carwise_messages",new Dictionary<string,string>{{"employee_id",employee}},offset:offset,ct:ct);
-            if(rows.Count==0)break;result.AddRange(rows.Select(r=>new Message(r!["role"]!.GetValue<string>(),r["text"]!.GetValue<string>())));offset+=rows.Count;
+            if(rows.Count==0)break;result.AddRange(rows.Select(r=>new Message(r!["role"]!.GetValue<string>(),r["text"]!.GetValue<string>()){At=MessageTime(r)}));offset+=rows.Count;
         }
         return result;
     }
@@ -107,8 +107,9 @@ public sealed class Repository(IJsonDatabase db)
         if(end==0)return new([],null,available);
         var rows=await db.ReadAsync("carwise_messages",new Dictionary<string,string>{{"employee_id",employee}},offset:start,limit:end-start,ct:ct);
         return new(rows.Select((row,index)=>new ArchivedMessage(start+index,row!["role"]!.GetValue<string>(),row["text"]!.GetValue<string>(),
-            DateTimeOffset.TryParse(row["created"]?.GetValue<string>(),out var at)?at:null)).ToArray(),start>0?start:null,available);
+            MessageTime(row))).ToArray(),start>0?start:null,available);
     }
+    private static DateTimeOffset? MessageTime(JsonNode? row)=>DateTimeOffset.TryParse(row?["created"]?.GetValue<string>(),System.Globalization.CultureInfo.InvariantCulture,System.Globalization.DateTimeStyles.None,out var at)?at:null;
     public async Task SaveConversationAsync(Employee e,string? target,CancellationToken ct=default) =>
         await db.RpcAsync("carwise_save_conversation",new(){["p_employee"]=JsonNode.Parse(JsonDefaults.Serialize(e)),["p_target"]=target},ct);
     public async Task<Conversation?> ConversationAsync(string employee,CancellationToken ct=default)

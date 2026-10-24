@@ -20,9 +20,9 @@ public sealed class ChatHistoryTests
         {
             Reads++;Assert.Equal(employee.Id,filters!["employee_id"]);
             if(table=="carwise_conversations")return Task.FromResult(new JsonArray(new JsonObject{["employee"]=JsonNode.Parse(JsonDefaults.Serialize(employee)),["status"]="Active"}));
-            Assert.Equal("carwise_messages",table);Assert.InRange(limit,1,100);
+            Assert.Equal("carwise_messages",table);Assert.InRange(limit,1,1000);
             return Task.FromResult(new JsonArray(Enumerable.Range(offset,Math.Min(limit,63-offset)).Select(index=>(JsonNode)new JsonObject{
-                ["role"]=index%2==0?"user":"assistant",["text"]="message "+index,["created"]="2026-10-24T10:00:00Z"}).ToArray()));
+                ["role"]=index%2==0?"user":"assistant",["text"]="message "+index,["created"]=index==59?null:index<50?"2026-10-23T20:59:59Z":"2026-10-23T21:00:00Z"}).ToArray()));
         }
         public Task UpsertAsync(string table,JsonArray rows,CancellationToken ct=default){Writes++;throw new NotSupportedException();}
         public Task<JsonNode> RpcAsync(string name,JsonObject parameters,CancellationToken ct=default){Writes++;throw new NotSupportedException();}
@@ -34,11 +34,20 @@ public sealed class ChatHistoryTests
         var db=new HistoryDatabase();var repository=new Repository(db);
         var latest=await repository.ArchivedHistoryAsync(db.EmployeeId,60,null,50,default);
         Assert.Equal(50,latest.Items.Length);Assert.Equal(10,latest.Items[0].Index);Assert.Equal(59,latest.Items[^1].Index);Assert.Equal(10,latest.NextBefore);Assert.Equal(60,latest.Total);
-        Assert.All(latest.Items,item=>Assert.NotNull(item.At));
+        Assert.All(latest.Items[..^1],item=>Assert.NotNull(item.At));Assert.Null(latest.Items[^1].At);
+        Assert.Equal(DateTimeOffset.Parse("2026-10-23T20:59:59Z"),latest.Items[0].At);
+        Assert.Equal(DateTimeOffset.Parse("2026-10-23T21:00:00Z"),latest.Items[^2].At);
         var older=await repository.ArchivedHistoryAsync(db.EmployeeId,60,latest.NextBefore,50,default);
         Assert.Equal(10,older.Items.Length);Assert.Equal(0,older.Items[0].Index);Assert.Equal(9,older.Items[^1].Index);Assert.Null(older.NextBefore);
         Assert.Empty((await repository.ArchivedHistoryAsync(db.EmployeeId,0,null,50,default)).Items);Assert.Equal(2,db.Reads);Assert.Equal(0,db.Writes);
         await Assert.ThrowsAsync<ArgumentException>(()=>repository.ArchivedHistoryAsync(db.EmployeeId,60,null,101,default));
+    }
+    [Fact] public async Task ActiveHistoryKeepsDatabaseTimestampsAndDoesNotInventMissingDates()
+    {
+        var db=new HistoryDatabase();var messages=await new Repository(db).HistoryAsync(db.EmployeeId,default,skip:58);
+        Assert.Equal(5,messages.Count);Assert.Equal(DateTimeOffset.Parse("2026-10-23T21:00:00Z"),messages[0].At);
+        Assert.Null(messages[1].At);Assert.NotNull(messages[2].At);
+        var json=JsonNode.Parse(JsonDefaults.Serialize(messages))!.AsArray();Assert.NotNull(json[0]!["at"]);Assert.Null(json[1]!["at"]);
     }
     [Fact] public async Task ActualArchiveEndpointRequiresEmployeeOwnershipAndDoesNotExposeAnotherEmployeeToAgent()
     {

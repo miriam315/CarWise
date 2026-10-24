@@ -1,7 +1,8 @@
-import {useEffect,useRef,useState} from 'react';
+import {Fragment,useEffect,useRef,useState} from 'react';
 import {ArrowRight,RefreshCw} from 'lucide-react';
 import {api} from './api';
 import './chat-history.css';
+import {ChatDate,ChatTime,chatDay} from './ChatDate';
 type Entry={index:number;role:string;text:string;at:string|null};
 type Page={items:Entry[];nextBefore:number|null;total:number};
 export default function ChatHistory({employeeId,onClose}:{employeeId:string;onClose:()=>void}){
@@ -19,7 +20,7 @@ export default function ChatHistory({employeeId,onClose}:{employeeId:string;onCl
  useEffect(()=>{alive.current=true;void load();return()=>{alive.current=false;generation.current++;inFlight.current=false}},[employeeId]);
  return <section className="chat-history" aria-label="היסטוריית שיחות"><div className="chat-history-heading"><h4>היסטוריית שיחות</h4><button type="button" className="text-button" onClick={onClose}><ArrowRight size={16}/> חזרה לשיחה הנוכחית</button></div><p className="chat-history-note">הודעות משיחות קודמות, לצפייה בלבד. פתיחת שיחה חדשה שומרת את ההודעות הקודמות כאן.</p>
   <div className="chat-history-messages" ref={viewport} aria-live="polite">{page?.nextBefore!=null&&<button type="button" className="outline-button" disabled={busy} onClick={()=>void load(page.nextBefore!)}>הודעות קודמות</button>}
-   {items.map(item=><article className={'message '+item.role} key={item.index}><div><small>{item.role==='user'?'ההודעה שלך':'היועץ'}{item.at&&<> · <time dateTime={item.at}>{new Date(item.at).toLocaleString('he-IL',{timeZone:'Asia/Jerusalem'})}</time></>}</small><p>{item.text}</p></div></article>)}
+   {items.map((item,index)=><Fragment key={item.index}>{(index===0||chatDay(item.at)!==chatDay(items[index-1].at))&&<ChatDate at={item.at}/>}<article className={'message '+item.role}><div><small className="chat-message-meta"><span>{item.role==='user'?'ההודעה שלך':'היועץ'}</span><ChatTime at={item.at}/></small><p>{item.text}</p></div></article></Fragment>)}
    {busy&&<p role="status">טוענים את ההיסטוריה…</p>}{!busy&&!error&&items.length===0&&<p>אין עדיין שיחות קודמות. הודעות השיחה הנוכחית זמינות בחזרה לשיחה.</p>}
    {error&&<div className="chat-error" role="alert">{error}<button type="button" className="text-button" disabled={busy} onClick={()=>void load(page?.nextBefore??undefined)}><RefreshCw size={16}/> ניסיון נוסף</button></div>}
   </div>

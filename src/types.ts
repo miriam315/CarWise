@@ -7,4 +7,4 @@ export type Simulation={employee:Employee;current:Result|null;results:Result[];c
 export type SessionUser={userId:string;email:string;displayName:string;role:string;employeeId?:string};
 export type Data={fleetVisible?:boolean;currentUser?:SessionUser;employees:Employee[];cars:Car[];occupations:Occupation[];rules:any;officialCount:number;canAdmin?:boolean;canAgent?:boolean;payslipEnabled?:boolean;payslipStatus?:{enabled:boolean;code:string;message:string};configurationRevision?:number};
 export type Ticket={id:string;employee:string;target:string;question:string;status:string;answer:string|null;participation:number|null;created:string};
-export type Message={role:string;text:string;candidates?:string[]};
+export type Message={role:string;text:string;candidates?:string[];at?:string|null};

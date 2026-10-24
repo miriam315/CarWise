@@ -82,6 +82,10 @@ def check(query, page, nav, screenshots):
     page.get_by_role('button', name='פתיחת היועץ החכם', exact=True).click()
     expect(page.locator('.chat-messages')).to_contain_text('פתחתי פנייה')
     before = query('/conversation/' + alternatives_profile['id'])['employee']
+    active_messages=query('/history/'+alternatives_profile['id'])
+    assert active_messages and all(message.get('at') for message in active_messages)
+    expect(page.locator('.chat-messages .chat-date-separator')).not_to_have_count(0)
+    expect(page.locator('.chat-messages .message time').first).to_have_attribute('datetime',active_messages[0]['at'])
     with page.expect_response(lambda response: response.request.method == 'POST' and response.url.endswith('/api/chat/new')) as resetting:
         page.get_by_role('button', name='שיחה חדשה', exact=True).click()
     assert resetting.value.ok
@@ -102,7 +106,10 @@ def check(query, page, nav, screenshots):
     expect(archive).to_contain_text('פתחתי פנייה')
     expect(page.get_by_label('הודעה ליועץ',exact=True)).to_have_count(0)
     assert not archive.locator('.candidate-list button').count()
-    assert query('/history/'+alternatives_profile['id']+'/archive')['items']
+    archived=query('/history/'+alternatives_profile['id']+'/archive')['items']
+    assert archived and all(item['at'] for item in archived)
+    expect(archive.locator('.chat-date-separator')).not_to_have_count(0)
+    expect(archive.locator('article time').first).to_have_attribute('datetime',archived[0]['at'])
     page.screenshot(path=str(screenshots/'chat-history-desktop.png'),full_page=True)
     page.set_viewport_size({'width':390,'height':844})
     expect(archive.get_by_role('heading',name='היסטוריית שיחות',exact=True)).to_be_visible()
@@ -112,4 +119,25 @@ def check(query, page, nav, screenshots):
     expect(page.get_by_label('הודעה ליועץ',exact=True)).to_be_visible()
     expect(page.locator('.chat-messages')).not_to_contain_text('פתחתי פנייה')
     page.set_viewport_size({'width':1440,'height':1100})
+    # Near UTC midnight, grouping follows Israel's calendar day, including in a UTC browser.
+    path='**/api/history/'+alternatives_profile['id']+'/archive?*'
+    def dated_history(route):
+        route.fulfill(json={'items':[
+            {'index':0,'role':'user','text':'Yesterday in Israel','at':'2026-10-23T20:59:59Z'},
+            {'index':1,'role':'assistant','text':'Today in Israel','at':'2026-10-23T21:00:00Z'},
+            {'index':2,'role':'user','text':'No timestamp','at':None},
+            {'index':3,'role':'assistant','text':'Invalid timestamp','at':'invalid'}], 'nextBefore':None,'total':4})
+    page.route(path,dated_history)
+    try:
+        page.get_by_role('button',name='היסטוריית שיחות',exact=True).click()
+        expect(archive.get_by_role('heading',name='23 באוקטובר 2026',exact=True)).to_be_visible()
+        expect(archive.get_by_role('heading',name='24 באוקטובר 2026',exact=True)).to_be_visible()
+        expect(archive.get_by_role('heading',name='תאריך לא זמין',exact=True)).to_be_visible()
+        expect(archive.locator('article time').nth(0)).to_have_text('23:59')
+        expect(archive.locator('article time').nth(1)).to_have_text('00:00')
+        expect(archive.get_by_text('שעה לא זמינה',exact=True)).to_have_count(2)
+        expect(archive).not_to_contain_text('Invalid Date')
+        page.screenshot(path=str(screenshots/'chat-history-israel-dates.png'),full_page=True)
+    finally:
+        page.unroute(path,dated_history)
     print('PASS: real chat accepts ASCII-quoted currency and labelled salary answers, confirms only the answered field, persists across reloads and advances intake using saved DB context.', flush=True)

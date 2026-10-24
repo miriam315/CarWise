@@ -86,7 +86,10 @@ public sealed record AnswerRequest(decimal Participation, string Answer);
 public sealed record ChatRequest(Employee Employee, string Text, string? Target, Dictionary<string, decimal>? Overrides);
 public sealed record Ticket(Guid Id, string EmployeeId, Employee Snapshot, string Target, string Question,
     string Status, string? Answer, decimal? Participation, DateTimeOffset Created);
-public sealed record Message(string Role, string Text,IReadOnlyList<string>? Candidates=null);
+public sealed record Message(string Role, string Text,IReadOnlyList<string>? Candidates=null)
+{
+    public DateTimeOffset? At {get;init;}
+}
 public sealed record Conversation(Employee Employee, string Status, string? Target);
 public sealed record DatabaseSnapshot(JsonNode Rules, List<Car> Cars, List<Employee> Employees,
     List<Dictionary<string, JsonElement>> Occupations, List<OfficialRecord> Official);
