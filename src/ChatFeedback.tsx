@@ -1,12 +1,12 @@
 import {useEffect,useLayoutEffect,useRef,useState} from 'react';
-import {LoaderCircle,Sparkles} from 'lucide-react';
+import {Sparkles} from 'lucide-react';
 import './chat-feedback.css';
 
 export function ChatProgress({startedAt}:{startedAt:number}){
  const [seconds,setSeconds]=useState(0);
  useEffect(()=>{setSeconds(Math.floor((Date.now()-startedAt)/1000));const timer=window.setInterval(()=>setSeconds(Math.floor((Date.now()-startedAt)/1000)),1000);return()=>window.clearInterval(timer)},[startedAt]);
  const note=seconds<10?'ההודעה נשלחה, מכינים את התשובה שלך.':seconds<25?'עדיין ממתינים לתשובה. אפשר להמשיך להשתמש באתר.':'זה לוקח קצת יותר זמן. הבקשה עדיין בטיפול.';
- return <div className="chat-progress" role="status" aria-live="polite"><span className="chat-progress-icon"><LoaderCircle size={22}/></span><div><strong>היועץ מכין תשובה…</strong><p>{note}</p><div className="chat-progress-track" aria-hidden="true"><span/></div><small aria-hidden="true">{seconds>0?'חלפו '+seconds+' שניות':'רגע, אני איתך'}</small></div></div>
+ return <div className="chat-progress" role="status" aria-live="polite"><span className="chat-progress-icon"><Sparkles size={22}/></span><div><strong>היועץ מכין תשובה…</strong><p>{note}</p><div className="chat-progress-dots" aria-hidden="true"><span>•</span><span>•</span><span>•</span></div><small aria-hidden="true">{seconds>0?'חלפו '+seconds+' שניות':'רגע, אני איתך'}</small></div></div>
 }
 export function TypingReply({text,active,onDone}:{text:string;active:boolean;onDone:()=>void}){
  const [length,setLength]=useState(active?0:text.length),done=useRef(onDone),paragraph=useRef<HTMLParagraphElement>(null);
