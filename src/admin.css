@@ -33,3 +33,9 @@
 @media(max-width:600px){.admin-tabs.admin-tabs{grid-template-columns:minmax(0,1fr)}.admin-tab-group{padding:12px}}
 .auth-forgot{justify-content:center;text-align:center;align-self:center;text-decoration:underline}.auth-recovery-notice{padding:20px;background:#f4f0fb;border:1px solid #ded2ef;border-radius:14px;line-height:1.8;overflow-wrap:anywhere}.auth-recovery-notice small{display:block;margin-top:14px;font-size:calc(20px * var(--text-scale,1));color:#655674}
 .employee-new-occupation{padding:20px;border:1px solid #dfd5ec;border-radius:12px;background:#faf8fd}.employee-new-occupation p,.employee-new-occupation small{display:block;line-height:1.7;margin:12px 0}.employee-new-occupation .outline-button{margin-top:14px}
+
+/* Keep the welcome copy beside the login form when the review list grows. */
+@media(min-width:751px){
+ .auth-shell{align-items:start}
+ .auth-story{align-self:start;block-size:clamp(620px,calc(100svh - 80px),850px)}
+}

@@ -74,8 +74,23 @@ def check(query, page, nav, screenshots):
     review=page.get_by_role('region',name='חשבונות לבדיקה',exact=True)
     expect(review.get_by_role('button',name='הצגת חשבונות לבדיקה',exact=True)).to_have_attribute('aria-expanded','false')
     expect(review.locator('li')).to_have_count(0);assert not requests
+    page.evaluate('document.fonts.ready')
+    def login_positions():
+        return page.evaluate('''() => Object.fromEntries(['.auth-story > div','.auth-branding','.auth-trust',
+            'input[aria-label="דוא״ל להתחברות"]','input[aria-label="סיסמה להתחברות"]'].map(selector=>{
+                const rect=document.querySelector(selector).getBoundingClientRect();
+                return [selector,{top:rect.top+scrollY,height:rect.height}];
+            }))''')
+    collapsed=login_positions()
     review.get_by_role('button',name='הצגת חשבונות לבדיקה',exact=True).click()
     expect(review.locator('li')).to_have_count(3)
+    expanded=login_positions()
+    for selector in collapsed:
+        assert abs(expanded[selector]['top']-collapsed[selector]['top'])<1,(selector,collapsed,expanded)
+    copy=expanded['.auth-story > div']
+    assert copy['top']<expanded['input[aria-label="סיסמה להתחברות"]']['top']+expanded['input[aria-label="סיסמה להתחברות"]']['height']
+    assert copy['top']+copy['height']>expanded['input[aria-label="דוא״ל להתחברות"]']['top']
+    page.screenshot(path=str(screenshots/'review-accounts-stable-desktop.png'),full_page=True)
     expect(review).not_to_contain_text('new-review@example.invalid')
     outside=review.locator('li').filter(has_text='outside-review@example.invalid')
     expect(outside.get_by_role('button')).to_be_disabled()
@@ -84,6 +99,7 @@ def check(query, page, nav, screenshots):
     expect(page.get_by_label('סיסמה להתחברות',exact=True)).to_have_value('SYNTHETIC-EXISTING-PASSWORD')
     review.get_by_role('button',name='הסתרת חשבונות לבדיקה',exact=True).click()
     expect(review.locator('li')).to_have_count(0)
+    assert login_positions()==collapsed
     # Reopening fetches again, so newly added users and changed publication status are current.
     entries[-1]['published']=False
     review.get_by_role('button',name='הצגת חשבונות לבדיקה',exact=True).click()
