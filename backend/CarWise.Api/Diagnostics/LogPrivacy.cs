@@ -14,6 +14,7 @@ public static class LogPrivacy
         "Supabase setup required. Open http://localhost:8000 on this computer; credentials are entered in the setup page.",
         "Could not refresh administration settings; retaining the last validated snapshot.",
         "Saved exchange rate unavailable.","Exchange rate update failed; retaining the last published rate.",
+        "OpenRouter saved pricing unavailable.","OpenRouter pricing update unavailable; retaining the last saved catalogue.",
         "AI factual answer rejected; verified facts used. Code=invalid_factual_template",
         "AI narration rejected by financial safety validation; payroll template used. Code=invalid_narration_template",
         "Application started. Press Ctrl+C to shut down.","Application is shutting down...",

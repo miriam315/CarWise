@@ -25,13 +25,13 @@ public sealed record TokenUsage(long Input,long CachedInput,long CacheWrite,long
                 var cached=Read("cache_read_input_tokens");var write=Read("cache_creation_input_tokens");
                 usage=new(Read("input_tokens",true)+cached+write,cached,write,Read("output_tokens",true));
             }
-            else usage=new(Read("prompt_tokens",true),u["prompt_tokens_details"]?["cached_tokens"]?.GetValue<long>()??0,0,Read("completion_tokens",true));
+            else usage=new(Read("prompt_tokens",true),u["prompt_tokens_details"]?["cached_tokens"]?.GetValue<long>()??0,u["prompt_tokens_details"]?["cache_write_tokens"]?.GetValue<long>()??0,Read("completion_tokens",true));
             return usage.Input>=0&&usage.CachedInput>=0&&usage.CacheWrite>=0&&usage.Output>=0&&usage.Input>=usage.CachedInput+usage.CacheWrite?usage:null;
         }
         catch(Exception error)when(error is InvalidDataException or InvalidOperationException or FormatException or OverflowException){return null;}
     }
-    public decimal? Cost(AiModelPrice? price)=>price is null||(CacheWrite>0&&price.CacheWriteUsdPerMillion is null)?null:
-        ((Input-CachedInput-CacheWrite)*price.InputUsdPerMillion+CachedInput*price.CachedInputUsdPerMillion+
+    public decimal? Cost(AiModelPrice? price)=>price is null||(CacheWrite>0&&price.CacheWriteUsdPerMillion is null)||(CachedInput>0&&price.CachedInputUsdPerMillion is null)?null:
+        ((Input-CachedInput-CacheWrite)*price.InputUsdPerMillion+CachedInput*(price.CachedInputUsdPerMillion??0)+
          CacheWrite*(price.CacheWriteUsdPerMillion??0)+Output*price.OutputUsdPerMillion)/1000000m;
 }
 public sealed record AiUsageRecord(string Id,DateTimeOffset StartedAt,DateTimeOffset? CompletedAt,string? ConversationId,string ActionId,
@@ -44,12 +44,14 @@ public sealed record AiUsageRecord(string Id,DateTimeOffset StartedAt,DateTimeOf
     public string? InvocationId {get;init;}
 }
 public sealed class UsageAccounting(IJsonDatabase database,ConfigurationSnapshot snapshot,ExchangeRates rates,AiOperationContext context,
-    ILogger<UsageAccounting> logger)
+    ILogger<UsageAccounting> logger,OpenRouterPricing? openRouter=null)
 {
     public async Task<AiUsageRecord> StartAsync(AiProfile profile,string operation,CancellationToken ct,string credentialId="primary",string credentialName="מפתח ראשי",int attempt=1,string? invocationId=null)
     {
         var host=new Uri(profile.BaseUrl).Host;
-        var price=snapshot.Document.Configuration.Ai.Pricing.SingleOrDefault(p=>p.Provider==profile.Provider&&p.Host==host&&p.Model==profile.Model);
+        var settings=snapshot.Document.Configuration.Ai;
+        var price=settings.Pricing.SingleOrDefault(p=>p.Provider==profile.Provider&&p.Host==host&&p.Model==profile.Model);
+        if(price is null&&settings.OpenRouterPricingEnabled)price=openRouter?.PriceFor(profile,settings);
         var record=new AiUsageRecord("usage:"+DateTimeOffset.UtcNow.ToString("yyyyMMddHHmmssfffffff")+":"+Guid.NewGuid().ToString("N"),
             DateTimeOffset.UtcNow,null,context.ConversationId,context.ActionId,operation,profile.Provider,host,profile.Model,snapshot.Document.PolicyVersion,
             price,rates.Current,"pending",null,null,null,null){CredentialId=credentialId,CredentialName=credentialName,Attempt=attempt,InvocationId=invocationId};

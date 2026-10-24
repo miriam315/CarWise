@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parent.parent
 OUTPUT = ROOT / '.local' / 'test-results'
 OUTPUT.mkdir(parents=True, exist_ok=True)
 parser = argparse.ArgumentParser(description=__doc__)
-parser.add_argument('--suite', action='append', choices=['fleet', 'intent', 'innovations', 'car-media', 'judge-demo', 'payslip', 'workspace', 'ai-model', 'employee-setup', 'participation', 'intake', 'logs'])
+parser.add_argument('--suite', action='append', choices=['fleet', 'intent', 'innovations', 'car-media', 'judge-demo', 'payslip', 'workspace', 'ai-model', 'employee-setup', 'participation', 'intake', 'logs', 'pricing'])
 parser.add_argument('--quick', action='store_true', help='OCR: test 2 documents instead of all 12')
 parser.add_argument('--video', action='store_true', help='Record judge rehearsal; requires Playwright ffmpeg')
 args = parser.parse_args()
@@ -49,7 +49,7 @@ def load_suite(name):
     return module
 
 
-for suite in args.suite or ['fleet', 'intent', 'innovations', 'car-media', 'judge-demo', 'payslip', 'workspace', 'ai-model', 'employee-setup', 'participation', 'intake', 'logs']:
+for suite in args.suite or ['fleet', 'intent', 'innovations', 'car-media', 'judge-demo', 'payslip', 'workspace', 'ai-model', 'employee-setup', 'participation', 'intake', 'logs', 'pricing']:
     dbname = 'carwise_e2e_' + uuid.uuid4().hex
     test_connection = re.sub(r'(?i)((?:^|;)\s*Database\s*=\s*)[^;]+', lambda m: m[1] + dbname, connection)
     subprocess.run(['docker', 'exec', container, 'createdb', '-U', db_user, dbname], check=True)
@@ -142,8 +142,8 @@ for suite in args.suite or ['fleet', 'intent', 'innovations', 'car-media', 'judg
                     page.screenshot(path=str(OUTPUT / (suite + '-failure.png')), full_page=True)
                     raise
                 browser.close()
-            if suite in ['fleet', 'intent', 'car-media', 'logs']:
-                path = '/fleet/officer' if suite == 'fleet' else '/data' if suite == 'car-media' else '/admin/logs' if suite == 'logs' else '/admin/intent/report'
+            if suite in ['fleet', 'intent', 'car-media', 'logs', 'pricing']:
+                path = '/fleet/officer' if suite == 'fleet' else '/data' if suite == 'car-media' else '/admin/logs' if suite == 'logs' else '/admin/pricing/openrouter' if suite == 'pricing' else '/admin/intent/report'
                 before = query(path)
                 stop()
                 process = launch()
@@ -153,6 +153,10 @@ for suite in args.suite or ['fleet', 'intent', 'innovations', 'car-media', 'judg
                     new_ids={item['sequence'] for item in after['items']}
                     assert old_ids & new_ids, 'Application logs did not survive restart'
                     assert any(item['eventId']==1001 and '400' in item['message'] for item in after['items']), 'Request diagnostic missing after restart'
+                elif suite == 'pricing':
+                    if before['catalog']:
+                        # The public catalogue is stored independently of policy configuration.
+                        assert before['catalog']==after['catalog'], 'Saved pricing changed after restart'
                 else:
                     keys = ['revision', 'assignments', 'requests', 'proposals', 'audit'] if suite == 'fleet' else ['cars','employees'] if suite == 'car-media' else ['cohorts']
                     assert all(before[key] == after[key] for key in keys), 'Saved state changed after restart'

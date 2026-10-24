@@ -102,15 +102,17 @@ public sealed class ConfigurationValidator(ReferenceData officialSource)
             foreach(var model in config.Ai.RegisteredModels())
                 try{ValidateAi(model.Profile);}
                 catch(ArgumentException error){throw new ArgumentException($"מודל ״{model.Name}״ ({model.Id}): {error.Message}");}
-            if(config.Ai.Pricing is null || config.Ai.Pricing.Count>200 || config.Ai.ExchangeRateUpdateHourUtc is <0 or >23)Fail("הגדרות תמחור או שעת עדכון אינן תקינות");
+            if(config.Ai.Pricing is null || config.Ai.Pricing.Count>200 || config.Ai.ExchangeRateUpdateHourUtc is <0 or >23 || config.Ai.OpenRouterPricingUpdateHourUtc is <0 or >23)Fail("הגדרות תמחור או שעת עדכון אינן תקינות");
             var priceKeys=new HashSet<string>();
+            if(config.Ai.OpenRouterPriceMappings is null||config.Ai.OpenRouterPriceMappings.Count>200||config.Ai.OpenRouterPriceMappings.Any(pair=>pair.Key is null||pair.Key.Length>400||
+                !Regex.IsMatch(pair.Key,@"^[A-Za-z0-9_./:@-]+$")||pair.Value is null||pair.Value.Length is <1 or >160||!Regex.IsMatch(pair.Value,@"^[A-Za-z0-9_./:@-]+$")))Fail("מיפוי מחירון OpenRouter אינו תקין");
             foreach(var price in config.Ai.Pricing!)
             {
                 var registered=config.Ai.RegisteredModels().Select(m=>m.Profile).FirstOrDefault(p=>p.CustomProvider&&p.Provider==price.Provider&&new Uri(p.BaseUrl).Host==price.Host);
                 ValidateAi(registered is null?new AiProfile{Provider=price.Provider,BaseUrl="https://"+price.Host+"/",Model=price.Model}:registered with{Model=price.Model});
                 if(price.Host!=new Uri("https://"+price.Host+"/").Host)Fail("דומיין תמחור אינו תקין");
                 if(!priceKeys.Add(price.Provider+"/"+price.Host+"/"+price.Model))Fail("תמחור כפול לאותו מודל וספק");
-                if(new[]{price.InputUsdPerMillion,price.CachedInputUsdPerMillion,price.OutputUsdPerMillion,price.CacheWriteUsdPerMillion??0}.Any(v=>v<0||v>100000)
+                if(new[]{price.InputUsdPerMillion,price.CachedInputUsdPerMillion??0,price.OutputUsdPerMillion,price.CacheWriteUsdPerMillion??0}.Any(v=>v<0||v>100000)
                     ||price.CachedInputUsdPerMillion>price.InputUsdPerMillion||string.IsNullOrWhiteSpace(price.Source)||price.Source.Length>500)Fail("תעריף מודל או מקור אינו תקין");
             }
             return new ReferenceData{Rules=data.Rules,Cars=data.Cars,Employees=employees,OccupationDocuments=data.OccupationDocuments,Official=data.Official,OfficialRowCount=config.OfficialVersionId=="baseline"?officialSource.OfficialRowCount:data.OfficialRowCount};

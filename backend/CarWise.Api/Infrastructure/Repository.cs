@@ -100,6 +100,15 @@ public sealed class Repository(IJsonDatabase db)
         return result;
     }
     public Task AddMessageAsync(string id,string role,string text,CancellationToken ct=default)=>db.AddMessageAsync(id,role,text,ct);
+    public async Task<ArchivedHistoryPage> ArchivedHistoryAsync(string employee,int available,int? before,int limit,CancellationToken ct)
+    {
+        if(limit is <1 or >100||before<0)throw new ArgumentException("עמוד היסטוריה אינו תקין");
+        available=Math.Max(0,available);var end=Math.Min(before??available,available);var start=Math.Max(0,end-limit);
+        if(end==0)return new([],null,available);
+        var rows=await db.ReadAsync("carwise_messages",new Dictionary<string,string>{{"employee_id",employee}},offset:start,limit:end-start,ct:ct);
+        return new(rows.Select((row,index)=>new ArchivedMessage(start+index,row!["role"]!.GetValue<string>(),row["text"]!.GetValue<string>(),
+            DateTimeOffset.TryParse(row["created"]?.GetValue<string>(),out var at)?at:null)).ToArray(),start>0?start:null,available);
+    }
     public async Task SaveConversationAsync(Employee e,string? target,CancellationToken ct=default) =>
         await db.RpcAsync("carwise_save_conversation",new(){["p_employee"]=JsonNode.Parse(JsonDefaults.Serialize(e)),["p_target"]=target},ct);
     public async Task<Conversation?> ConversationAsync(string employee,CancellationToken ct=default)

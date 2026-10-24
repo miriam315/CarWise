@@ -138,6 +138,9 @@ builder.Services.AddSingleton<ExchangeRates>();builder.Services.AddSingleton<Usa
 builder.Services.AddScoped<AiOperationContext>();builder.Services.AddScoped<UsageAccounting>();
 builder.Services.AddHttpClient("ExchangeRates",client=>client.Timeout=TimeSpan.FromSeconds(20)).ConfigurePrimaryHttpMessageHandler(()=>new SocketsHttpHandler{AllowAutoRedirect=false,UseCookies=false});
 builder.Services.AddHostedService<ExchangeRateWorker>();
+builder.Services.AddSingleton<OpenRouterPricing>();
+builder.Services.AddHttpClient("OpenRouterPricing",client=>client.Timeout=TimeSpan.FromSeconds(25)).ConfigurePrimaryHttpMessageHandler(()=>new SocketsHttpHandler{AllowAutoRedirect=false,UseCookies=false});
+builder.Services.AddHostedService<OpenRouterPricingWorker>();
 builder.Services.AddHttpClient("AiCustomProviders").ConfigurePrimaryHttpMessageHandler(()=>new SocketsHttpHandler{AllowAutoRedirect=false,UseCookies=false,UseProxy=false,ConnectCallback=PublicAiConnection.ConnectAsync});
 builder.Services.AddHttpClient("AiProviders").ConfigurePrimaryHttpMessageHandler(()=>new SocketsHttpHandler{AllowAutoRedirect=false,UseCookies=false});
 builder.Services.AddScoped<IDataExtractionService>(sp=>{
@@ -297,6 +300,7 @@ app.MapGet("/api/history/{employee}",async(string employee,HttpContext context,A
     if(last>=0&&candidates is {Length:>0})messages[last]=messages[last] with{Candidates=candidates.Where(id=>id=="waiver"||reference.Cars.Any(car=>car.Id==id)).ToArray()};
     return messages;
 });
+app.MapChatHistory();
 app.MapGet("/api/conversation/{employee}",async(string employee,HttpContext context,AccessControl access,CancellationToken ct)=>
 {
     access.Employee(context,employee);return await repository.ConversationAsync(employee,ct);

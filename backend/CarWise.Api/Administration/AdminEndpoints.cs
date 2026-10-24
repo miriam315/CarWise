@@ -49,6 +49,9 @@ public static class AdminEndpoints
             .WithMetadata(new Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute("login"));
         group.MapGet("/usage/conversation/{id}",(string id,UsageReports reports,CancellationToken ct)=>reports.ConversationAsync(id,ct));
         group.MapGet("/usage",(string? after,int? limit,UsageReports reports,CancellationToken ct)=>reports.ReadAsync(after,limit,ct));
+        group.MapGet("/pricing/openrouter",(OpenRouterPricing pricing)=>pricing.View());
+        group.MapPost("/pricing/openrouter/refresh",async(OpenRouterPricing pricing,CancellationToken ct)=>{await pricing.RefreshAsync(ct);return pricing.View();})
+            .WithMetadata(new Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute("login"));
         group.MapGet("/exchange-rate",(ExchangeRates rates)=>rates.View());
         group.MapPost("/exchange-rate/refresh",async(ExchangeRates rates,CancellationToken ct)=>{await rates.RefreshAsync(ct);return rates.View();})
             .WithMetadata(new Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute("login"));

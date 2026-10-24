@@ -26,7 +26,12 @@ public sealed record AiProfile
 public sealed record AiBackupKey(string Id,string Name,string KeyReference,bool Enabled=true);
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record AiModelPrice(string Provider,string Host,string Model,decimal InputUsdPerMillion,
-    decimal CachedInputUsdPerMillion,decimal OutputUsdPerMillion,decimal? CacheWriteUsdPerMillion,string Source);
+    decimal? CachedInputUsdPerMillion,decimal OutputUsdPerMillion,decimal? CacheWriteUsdPerMillion,string Source)
+{
+    public DateTimeOffset? RetrievedAt {get;init;}
+    public string? SourceModel {get;init;}
+    public bool ReferenceOnly {get;init;}
+}
 public sealed record AiRegisteredModel(string Id,string Name,AiProfile Profile);
 public sealed record AiConfiguration(bool Enabled,AiProfile Extraction,AiProfile Narration)
 {
@@ -48,6 +53,9 @@ public sealed record AiConfiguration(bool Enabled,AiProfile Extraction,AiProfile
     public List<AiModelPrice> Pricing {get;init;}=[];
     public bool DailyExchangeRateEnabled {get;init;}=true;
     public int ExchangeRateUpdateHourUtc {get;init;}=17;
+    public bool OpenRouterPricingEnabled {get;init;}=true;
+    public int OpenRouterPricingUpdateHourUtc {get;init;}=3;
+    public Dictionary<string,string> OpenRouterPriceMappings {get;init;}=[];
 }
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record ManagedConfiguration(JsonNode Rules,List<Car> Cars,List<Dictionary<string,JsonElement>> Occupations,
