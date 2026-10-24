@@ -106,8 +106,12 @@ def check(query,page,nav,screenshots):
         login.append(route.request.post_data_json)
         route.fulfill(status=400,json={'error':'בדיקת התחברות בלבד'})
     page.route('**/api/auth/login',probe)
+    review_items=[{'id':str(i),'role':'admin' if i==0 else 'employee','email':f'review{i}@example.invalid','password':'SYNTHETIC-REVIEW-PASSWORD'} for i in range(5)]
+    page.route('**/api/auth/review-accounts',lambda route:route.fulfill(json={'enabled':True,'items':review_items}))
     review=page.get_by_role('region',name='חשבונות לבדיקה',exact=True)
-    expect(review).to_be_visible();expect(review.locator('li')).to_have_count(5)
+    expect(review).to_be_visible();expect(review.locator('li')).to_have_count(0)
+    review.get_by_role('button',name='הצגת חשבונות לבדיקה',exact=True).click()
+    expect(review.locator('li')).to_have_count(5)
     for account in review.locator('li').all():
         displayed=account.locator('dd code').all_inner_texts()
         account.get_by_role('button').click()

@@ -17,6 +17,18 @@ public static class AdminEndpoints
             await manager.SaveAsync(request,Actor(context),ct);return LocalSetupAccess.RestartResult(context,app);
         }).WithMetadata(new Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute("login"));
         group.MapGet("/accounts",async(AuthAccounts accounts,CancellationToken ct)=>new{items=await accounts.ListAsync(ct)});
+        group.MapGet("/review-accounts",async(ReviewAccounts review,AuthAccounts accounts,CancellationToken ct)=>{
+            if(!demo)await accounts.ListAsync(ct);
+            return await review.AdminViewAsync(ct);
+        });
+        group.MapPost("/review-accounts",async(ReviewAccountSettings request,ReviewAccounts review,CancellationToken ct)=>{
+            await review.SetEnabledAsync(request.Enabled,ct);return await review.AdminViewAsync(ct);
+        });
+        group.MapPost("/review-accounts/{id}",async(string id,ReviewAccountUpdate request,ReviewAccounts review,AuthAccounts accounts,CancellationToken ct)=>{
+            await accounts.ListAsync(ct);
+            if(!string.IsNullOrEmpty(request.Password))await accounts.VerifyReviewPasswordAsync(id,request.Password,ct);
+            await review.UpdateAsync(id,request,ct);return await review.AdminViewAsync(ct);
+        }).WithMetadata(new Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute("login"));
         group.MapPost("/accounts",(CreateAccount request,AuthAccounts accounts,CancellationToken ct)=>accounts.CreateAsync(request,ct))
             .WithMetadata(new Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute("login"));
         group.MapPost("/accounts/{id}/password",async(string id,ResetAccountPassword request,AuthAccounts accounts,CancellationToken ct)=>{await accounts.ResetAsync(id,request.Password,ct);return new{saved=true};})

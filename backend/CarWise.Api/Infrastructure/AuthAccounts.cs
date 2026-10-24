@@ -6,8 +6,8 @@ using CarWise.Api.Domain;
 namespace CarWise.Api.Infrastructure;
 public sealed record CreateAccount(string Email,string Password,string Role,string? EmployeeId);
 public sealed record ResetAccountPassword(string Password);
-public sealed record AuthAccount(string Id,string Email,string Role,string? EmployeeId,DateTimeOffset? CreatedAt);
-public sealed class AuthAccounts(HttpClient client,IJsonDatabase database,ConfigurationState state)
+public sealed record AuthAccount(string Id,string Email,string Role,string? EmployeeId,DateTimeOffset? CreatedAt,bool Disabled=false);
+public sealed class AuthAccounts(HttpClient client,IJsonDatabase database,ConfigurationState state,ReviewAccounts? review=null)
 {
     public async Task<List<AuthAccount>> ListAsync(CancellationToken ct)
     {
@@ -17,13 +17,14 @@ public sealed class AuthAccounts(HttpClient client,IJsonDatabase database,Config
             using var response=await client.GetAsync("auth/v1/admin/users?page="+page+"&per_page=100",ct);
             if(!response.IsSuccessStatusCode)throw new ArgumentException("לא ניתן לקרוא את חשבונות Supabase Auth. בדקו שהוגדר מפתח שרת בעל הרשאות ניהול.");
             var body=await response.Content.ReadFromJsonAsync<JsonNode>(ct);var users=body?["users"]?.AsArray()??throw new ArgumentException("Supabase Auth החזיר מבנה לא תקין");
-            result.AddRange(users.Select(Read));if(users.Count<100)return result;
+            result.AddRange(users.Select(Read));if(users.Count<100){if(review is not null)await review.SyncAsync(result,ct);return result;}
         }
         throw new ArgumentException("מספר החשבונות גדול ממגבלת הניהול");
     }
     private static AuthAccount Read(JsonNode? user)=>new(user!["id"]!.GetValue<string>(),user["email"]?.GetValue<string>()??"",
         user["app_metadata"]?["role"]?.GetValue<string>()??"unassigned",user["app_metadata"]?["employee_id"]?.GetValue<string>(),
-        DateTimeOffset.TryParse(user["created_at"]?.GetValue<string>(),out var created)?created:null);
+        DateTimeOffset.TryParse(user["created_at"]?.GetValue<string>(),out var created)?created:null,
+        (DateTimeOffset.TryParse(user["banned_until"]?.GetValue<string>(),out var banned)&&banned>DateTimeOffset.UtcNow)||user["deleted_at"] is not null);
     public static void Password(string password)
     {if(string.IsNullOrEmpty(password)||password.Length is <12 or >128)throw new ArgumentException("יש לבחור סיסמה באורך 12–128 תווים");}
     public void Validate(CreateAccount request)
@@ -48,7 +49,9 @@ public sealed class AuthAccounts(HttpClient client,IJsonDatabase database,Config
         using var response=await client.PostAsJsonAsync("auth/v1/admin/users",new{email=request.Email,password=request.Password,email_confirm=true,
             app_metadata=new{role=request.Role,employee_id=string.IsNullOrWhiteSpace(request.EmployeeId)?null:request.EmployeeId}},ct);
         if(!response.IsSuccessStatusCode)throw new ArgumentException("יצירת החשבון נכשלה. בדקו שהכתובת פנויה ושהסיסמה עומדת בדרישות Supabase.");
-        return Read(await response.Content.ReadFromJsonAsync<JsonNode>(ct));
+        var account=Read(await response.Content.ReadFromJsonAsync<JsonNode>(ct));
+        if(review is not null)await review.CaptureAsync(account,request.Password,ct);
+        return account;
     }
     public async Task<bool> NeedsAdminAsync(CancellationToken ct)=>(await ListAsync(ct)).All(u=>u.Role!="admin");
     public async Task<AuthAccount> BootstrapAsync(CreateAccount request,CancellationToken ct)
@@ -80,5 +83,19 @@ public sealed class AuthAccounts(HttpClient client,IJsonDatabase database,Config
         Password(password);if(!Guid.TryParse(id,out _))throw new ArgumentException("מזהה חשבון לא תקין");
         using var response=await client.PutAsJsonAsync("auth/v1/admin/users/"+id,new{password},ct);
         if(!response.IsSuccessStatusCode)throw new ArgumentException("איפוס הסיסמה נכשל. בדקו שהחשבון קיים ושהסיסמה תקינה.");
+        if(review is not null)
+        {
+            var account=(await ListAsync(ct)).FirstOrDefault(a=>a.Id==id);
+            if(account is not null)await review.CaptureAsync(account,password,ct);
+        }
+    }
+    public async Task VerifyReviewPasswordAsync(string id,string password,CancellationToken ct)
+    {
+        Password(password);
+        var account=(await ListAsync(ct)).FirstOrDefault(a=>a.Id==id&&!a.Disabled)??throw new ArgumentException("החשבון לא נמצא או הושבת.");
+        using var response=await client.PostAsJsonAsync("auth/v1/token?grant_type=password",new{email=account.Email,password},ct);
+        if(!response.IsSuccessStatusCode)throw new ArgumentException("הסיסמה לא אומתה מול Supabase. לא נשמר שינוי ולא בוצע איפוס.");
+        var body=await response.Content.ReadFromJsonAsync<JsonNode>(ct);
+        if(body?["user"]?["id"]?.GetValue<string>()!=id)throw new ArgumentException("לא ניתן לאמת את הסיסמה לחשבון הזה.");
     }
 }

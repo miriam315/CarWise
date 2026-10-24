@@ -62,3 +62,5 @@ body{padding-bottom:88px}.text-size-control{position:fixed;inset-inline-end:10px
 .text-size-options{display:flex;align-items:center;gap:3px}.text-size-control .text-size-toggle{padding:0;background:#fff;color:#6540bb}
 
 .advisor-launcher{width:48px;height:48px;padding:0;gap:0;border-radius:50%}
+
+.auth-review-toggle{width:100%;justify-content:center;gap:8px}.auth-review-access>div>p{font-size:.85rem;color:#665a73;margin:14px 0}.auth-review-access .text-button:disabled{opacity:.55;cursor:default}

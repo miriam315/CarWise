@@ -152,7 +152,8 @@ builder.Services.AddScoped<IResponseNarrationService>(sp=>{
     return ai.Enabled?new AiNarrationService(new ConfiguredCompletionClient(ai.ProfileFor("narration"),sp.GetRequiredService<SecretVault>(),sp.GetRequiredService<IHttpClientFactory>(),accounting:sp.GetRequiredService<UsageAccounting>(),health:sp.GetRequiredService<AiKeyHealth>(),logger:sp.GetRequiredService<ILogger<ConfiguredCompletionClient>>()),sp.GetRequiredService<ILogger<AiNarrationService>>(),ai.NarrationPrompt):new TemplateNarrationService();
 });
 builder.Services.AddSingleton(new AccessControl(SupabaseClient(),demo));
-builder.Services.AddSingleton(new AuthAccounts(SupabaseClient(),database,state));
+builder.Services.AddSingleton<ReviewAccounts>();
+builder.Services.AddSingleton(sp=>new AuthAccounts(SupabaseClient(),database,state,sp.GetRequiredService<ReviewAccounts>()));
 builder.Services.AddScoped<AdvisorToolConversation>(sp=>{
     var ai=sp.GetRequiredService<ConfigurationSnapshot>().Document.Configuration.Ai;
     if(!ai.Enabled)return null!;
@@ -165,6 +166,7 @@ builder.Services.AddRateLimiter(options=>{
     options.AddPolicy("documents",context=>RateLimitPartition.GetFixedWindowLimiter(context.Items["caller"] is Caller caller?caller.UserId:context.Connection.RemoteIpAddress?.ToString()??"unknown",_=>new FixedWindowRateLimiterOptions{PermitLimit=5,Window=TimeSpan.FromMinutes(1),QueueLimit=0}));
     options.AddPolicy("car-media",context=>RateLimitPartition.GetFixedWindowLimiter(context.Items["caller"] is Caller caller?caller.UserId:context.Connection.RemoteIpAddress?.ToString()??"unknown",_=>new FixedWindowRateLimiterOptions{PermitLimit=90,Window=TimeSpan.FromMinutes(1),QueueLimit=0}));
     options.AddPolicy("login",context=>RateLimitPartition.GetFixedWindowLimiter(context.Connection.RemoteIpAddress?.ToString()??"unknown",_=>new FixedWindowRateLimiterOptions{PermitLimit=8,Window=TimeSpan.FromMinutes(1),QueueLimit=0}));
+    options.AddPolicy("review-accounts",context=>RateLimitPartition.GetFixedWindowLimiter(context.Connection.RemoteIpAddress?.ToString()??"unknown",_=>new FixedWindowRateLimiterOptions{PermitLimit=20,Window=TimeSpan.FromMinutes(1),QueueLimit=0}));
     options.AddPolicy("intent",context=>RateLimitPartition.GetFixedWindowLimiter(context.Connection.RemoteIpAddress?.ToString()??"unknown",_=>new FixedWindowRateLimiterOptions{PermitLimit=12,Window=TimeSpan.FromMinutes(1),QueueLimit=0}));
 });
 var app=builder.Build();
@@ -213,7 +215,7 @@ app.Use(async(context,next)=>
     {
         var path=context.Request.Path.Value??"";
         if(path.StartsWith("/api/",StringComparison.Ordinal))RequestProtection.Validate(context,builder.Environment.IsDevelopment());
-        if(path.StartsWith("/api/") && path is not ("/api/health" or "/api/runtime" or "/api/auth/login" or "/api/setup/admin/status" or "/api/setup/admin"))
+        if(path.StartsWith("/api/") && path is not ("/api/health" or "/api/runtime" or "/api/auth/login" or "/api/auth/review-accounts" or "/api/setup/admin/status" or "/api/setup/admin"))
             context.Items["caller"]=await app.Services.GetRequiredService<AccessControl>().AuthenticateAsync(context,context.RequestAborted);
         await next(context);
     }
@@ -251,6 +253,18 @@ app.MapPost("/api/auth/login",async(LoginRequest request,AccessControl access,Ca
     if(demo)return Results.BadRequest(new{error="מצב הדגמה אינו דורש התחברות"});
     return Results.Ok(await access.LoginAsync(request.Email,request.Password,ct));
 }).WithMetadata(new Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute("login"));
+app.MapGet("/api/auth/review-accounts",async(ReviewAccounts review,AuthAccounts accounts,CancellationToken ct)=>{
+    try
+    {
+        if(await review.EnabledAsync(ct)&&!demo)await accounts.ListAsync(ct);
+        return Results.Ok(await review.PublicViewAsync(ct));
+    }
+    catch(Exception error)when(error is ArgumentException or HttpRequestException or OperationCanceledException)
+    {
+        // Do not disclose old credentials if deletion/ban status could not be checked.
+        return Results.Json(new{error="לא ניתן לעדכן את רשימת חשבונות הבדיקה כרגע. נסו שוב בהמשך."},statusCode:503);
+    }
+}).WithMetadata(new Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute("review-accounts"));
 app.MapGet("/api/data",async(HttpContext context,ConfigurationSnapshot snapshot,AccessControl access,SecretVault vault,CancellationToken ct)=>{
     var reference=snapshot.Data;var payslipStatus=await PayslipAvailability.ReadAsync(snapshot.Document.Configuration.Ai,vault,ct);
     var caller=context.Items["caller"] as Caller;
