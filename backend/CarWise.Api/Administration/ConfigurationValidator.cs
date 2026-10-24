@@ -80,7 +80,7 @@ public sealed class ConfigurationValidator(ReferenceData officialSource)
             }
             foreach(var document in config.Occupations)
             {
-                if(!groups.Contains(document["group"].GetString()!))Fail("קבוצת עיסוק אינה מוגדרת");
+                if(document["group"].GetString() is not {} occupationGroup||occupationGroup.Length>0&&!groups.Contains(occupationGroup))Fail("קבוצת עיסוק אינה מוגדרת");
                 if(document["mandatory"].GetBoolean()&&document["waiver"].GetBoolean())Fail("עיסוק עם רכב חובה אינו יכול לאפשר ויתור");
                 var maintenance=document["maintenance"].GetDecimal();if(maintenance<0 || maintenance>30000)Fail("אחזקת רכב מחוץ לטווח");
                 if(!document["waiver"].GetBoolean()&&maintenance!=0)Fail("עיסוק שאינו מאפשר ויתור חייב באחזקה אפס");

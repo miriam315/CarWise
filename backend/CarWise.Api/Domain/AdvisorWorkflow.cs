@@ -129,6 +129,7 @@ public sealed class AdvisorWorkflow
     }
     public void ResolveInputs(Employee employee)
     {
+        if(State.AwaitingField=="eligibility"&&!string.IsNullOrWhiteSpace(employee.Group))State=State with{AwaitingField=null};
         if(State.AwaitingField is {} answered&&IntakeFields.All.Contains(answered)&&IntakeFields.Known(employee,answered))
             State=State with{AwaitingField=null};
         var pending=Memory.Pending;

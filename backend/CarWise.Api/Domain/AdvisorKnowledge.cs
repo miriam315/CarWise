@@ -23,6 +23,7 @@ public static class AdvisorKnowledge
     public static string Answer(IEnumerable<string> topics,Employee e,ReferenceData data,PayrollEngine engine)
     {
         var answers=new List<string>();var occupation=data.OccupationFor(e.Occupation);
+        if(occupation.Group.Length==0)return IntakeFields.Question("eligibility",data);
         var ownOnly=data.Rules["chooseFrom"]!.GetValue<string>()=="own_group_only";
         foreach(var topic in topics.Distinct().Take(9))
         {

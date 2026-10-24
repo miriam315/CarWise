@@ -265,8 +265,12 @@ void AuthorizeEmployee(HttpContext context,AccessControl access,Employee employe
     if(employee is null)throw new ArgumentException("חסר פרופיל עובד");
     access.Employee(context,employee.Id);
     var reference=context.RequestServices.GetRequiredService<ReferenceData>();
-    if(!demo && context.Items["caller"] is not Caller{IsAdmin:true} && reference.Employees.SingleOrDefault(e=>e.Id==employee.Id)?.Occupation!=employee.Occupation)
-        throw new UnauthorizedAccessException("Forbidden");
+    if(!demo && context.Items["caller"] is not Caller{IsAdmin:true})
+    {
+        var configured=reference.Employees.SingleOrDefault(e=>e.Id==employee.Id);
+        if(configured is null||!string.IsNullOrWhiteSpace(employee.Occupation)&&configured.Occupation!=employee.Occupation)
+            throw new UnauthorizedAccessException("Forbidden");
+    }
 }
 app.MapPost("/api/profile",async(SimulateRequest request,HttpContext context,AccessControl access,PayrollEngine engine,CancellationToken ct)=>
 {
@@ -301,9 +305,10 @@ app.MapGet("/api/history/{employee}",async(string employee,HttpContext context,A
     return messages;
 });
 app.MapChatHistory();
-app.MapGet("/api/conversation/{employee}",async(string employee,HttpContext context,AccessControl access,CancellationToken ct)=>
+app.MapGet("/api/conversation/{employee}",async(string employee,HttpContext context,AccessControl access,PayrollEngine engine,CancellationToken ct)=>
 {
-    access.Employee(context,employee);return await repository.ConversationAsync(employee,ct);
+    access.Employee(context,employee);var saved=await repository.ConversationAsync(employee,ct);
+    return saved is null?null:saved with{Employee=engine.Validate(saved.Employee)};
 });
 app.MapPost("/api/chat",async(ChatRequest request,HttpContext context,AccessControl access,AdvisorService advisor,IntentAnalytics intents,CancellationToken ct)=>
 {

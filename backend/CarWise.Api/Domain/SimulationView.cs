@@ -8,7 +8,7 @@ public static class SimulationView
     public static JsonNode Incomplete(Employee employee)=>new JsonObject{
         ["employee"]=JsonSerializer.SerializeToNode(employee,JsonDefaults.Options),["current"]=null,["results"]=new JsonArray(),
         ["complete"]=false,["missingFields"]=JsonSerializer.SerializeToNode(IntakeFields.Missing(employee)),
-        ["message"]="חסרים נתונים. אפשר להשלים אותם בשיחה או בטופס; עדיין אין חישוב נטו."};
+        ["message"]=string.IsNullOrWhiteSpace(employee.Group)?"קבוצת הזכאות טרם נקבעה. ניתן לשמור נתונים ולהשלים את השיוך בניהול בהמשך; עדיין אין חישוב נטו.":"חסרים נתונים. אפשר להשלים אותם בשיחה או בטופס; עדיין אין חישוב נטו."};
     public static JsonNode Complete(Simulation simulation)
     {
         var result=JsonSerializer.SerializeToNode(simulation,JsonDefaults.Options)!;

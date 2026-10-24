@@ -57,6 +57,7 @@ public sealed class AdvisorService(ReferenceData data,PayrollEngine engine,Repos
             return await ReplyAsync(e,state with{CandidateIds=null,AwaitingField=missingStatus.FirstOrDefault()??state.AwaitingField,OfferedReferral=missingStatus.Length>0&&answer.Contains("נציג",StringComparison.Ordinal)?missingStatus[0]:null},text,answer,[],ct);
         }
         if(AdvisorScope.ClearlyUnrelated(text))return await ReplyAsync(e,state,text,AdvisorScope.Redirect,[],ct);
+        if(string.IsNullOrWhiteSpace(e.Group))return await ReplyAsync(e,state with{AwaitingField="eligibility",Target=null,CandidateIds=[]},text,IntakeFields.Question("eligibility",data),[],ct,status:"needs_eligibility");
         if(workflow.Memory.Pending is {Kind:not "clarification"}&&AdvisorDialogue.AcceptsReferral(text))
         {
             var accepted=await new AdvisorOperations(data,engine,repository).AcceptAsync(e,ct);

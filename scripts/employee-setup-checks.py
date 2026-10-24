@@ -7,6 +7,8 @@ def check(query,page,nav,screenshots):
     nav('ניהול המערכת');page.get_by_role('tab',name='עובדים',exact=True).click()
     page.get_by_role('button',name='הוספת עובד',exact=True).click()
     editor=page.get_by_role('dialog',name='עריכת עובד',exact=True)
+    expect(editor.get_by_label('עיסוק העובד',exact=True)).to_have_value('')
+    expect(editor).to_contain_text('קבוצת זכאות טרם נקבעה')
     editor.get_by_label('שם',exact=True).fill('Synthetic representative')
     editor.get_by_label('הרשאה בפרופיל עובד',exact=True).select_option('agent')
     editor.get_by_role('button',name='סיום עריכה בטיוטה',exact=True).click()
@@ -15,6 +17,12 @@ def check(query,page,nav,screenshots):
     expect(page.locator('.admin-success')).to_contain_text('הנתונים נשמרו')
     saved=query('/admin/configuration');assert saved['policyRevision']==baseline['policyRevision']
     representative=next(e for e in saved['configuration']['employees'] if e['name']=='Synthetic representative')
+    assert representative['group']=='' and representative['occupation']=='' and representative['currentCar'] is None
+    incomplete=query('/simulate',{'employee':{**representative,'group':'ד'}})
+    assert incomplete['complete'] is False and incomplete['missingFields'][0]=='eligibility' and incomplete['current'] is None and incomplete['results']==[]
+    reply=query('/chat',{'employee':representative,'text':'אני בקבוצה ד, איזה רכב חשמלי מתאים לי?'})
+    assert reply['status']=='needs_eligibility' and reply['employee']['group']=='' and reply['candidates']==[]
+    assert 'טרם נקבעה' in reply['reply'] and '₪' not in reply['reply']
     assert saved['configuration']['employeeAccountRoles'][representative['id']]=='agent'
     # Account UI uses saved assignments, never an arbitrary occupation->role guess.
     accounts=[];created=[]
@@ -40,6 +48,8 @@ def check(query,page,nav,screenshots):
     nav('הסקירה שלי')
     missing=page.get_by_role('heading',name='נשלים רק את מה שחסר.',exact=True)
     expect(missing).to_be_visible()
+    expect(page.get_by_role('status').filter(has_text='קבוצת הזכאות טרם נקבעה')).to_be_visible()
+    assert 'NaN' not in page.locator('body').inner_text()
     nav('מרכז הנציגים');expect(missing).to_have_count(0)
     expect(page.locator('.agent-stats>.panel')).to_have_count(2)
     expect(page.locator('.agent-stats')).not_to_contain_text('Supabase')
@@ -53,8 +63,6 @@ def check(query,page,nav,screenshots):
     editor.get_by_label('שם',exact=True).fill('Synthetic free occupation')
     editor.get_by_label('עיסוק העובד',exact=True).select_option('__new__')
     editor.get_by_label('שם העיסוק החדש',exact=True).fill('עיסוק חדש סינתטי')
-    editor.get_by_role('button',name='הוספת העיסוק ושיוכו לעובד',exact=True).click()
-    expect(editor.get_by_role('alert')).to_contain_text('קבוצת הזכאות')
     expect(editor.get_by_role('button',name='סיום עריכה בטיוטה',exact=True)).to_be_disabled()
     editor.get_by_label('קבוצת זכאות לעיסוק חדש',exact=True).select_option('א')
     editor.get_by_label('מותר לוותר על רכב בעיסוק החדש',exact=True).check()
@@ -69,6 +77,33 @@ def check(query,page,nav,screenshots):
     occupation=next(o for o in after['configuration']['occupations'] if o['occupation']=='עיסוק חדש סינתטי')
     assert occupation['group']=='א' and occupation['waiver'] and occupation['maintenance']==321
     assert next(e for e in after['configuration']['employees'] if e['name']=='Synthetic free occupation')['occupation']==occupation['occupation']
+    # A named occupation can also remain unclassified, without assigning group A by default.
+    page.get_by_role('button',name='הוספת עובד',exact=True).click()
+    editor.get_by_label('שם',exact=True).fill('Synthetic pending occupation')
+    editor.get_by_label('עיסוק העובד',exact=True).select_option('__new__')
+    editor.get_by_label('שם העיסוק החדש',exact=True).fill('עיסוק ממתין סינתטי')
+    expect(editor.get_by_label('קבוצת זכאות לעיסוק חדש',exact=True)).to_have_value('')
+    editor.get_by_role('button',name='הוספת העיסוק ושיוכו לעובד',exact=True).click()
+    editor.get_by_role('button',name='סיום עריכה בטיוטה',exact=True).click()
+    page.get_by_label('סיבת שינוי הגדרות',exact=True).fill('Pending role has no group yet')
+    page.get_by_role('button',name='שמירה והפעלה',exact=True).click()
+    expect(page.locator('.admin-success')).to_contain_text('נשמרו והופעלו')
+    pending_saved=query('/admin/configuration')
+    pending_employee=next(e for e in pending_saved['configuration']['employees'] if e['name']=='Synthetic pending occupation')
+    assert pending_employee['occupation']=='עיסוק ממתין סינתטי' and pending_employee['group']==''
+    pending_role=next(o for o in pending_saved['configuration']['occupations'] if o['occupation']==pending_employee['occupation'])
+    assert pending_role['group']==''
+    # A later administrator assignment resolves the saved conversation instead of keeping the old empty role.
+    latest=query('/admin/configuration');config=latest['configuration']
+    configured=next(e for e in config['employees'] if e['id']==representative['id'])
+    known_role=next(o for o in config['occupations'] if o['waiver'] and o['group'])
+    configured.update(occupation=known_role['occupation'])
+    query('/admin/configuration',{'expectedRevision':latest['revision'],'configuration':config,'note':''})
+    resolved=query('/conversation/'+representative['id'])['employee']
+    assert resolved['occupation']==known_role['occupation'] and resolved['group']==known_role['group']
+    assert 'eligibility' not in query('/simulate',{'employee':resolved})['missingFields']
+    after=query('/admin/configuration')
+    page.reload();page.wait_for_selector('.vehicle-card');nav('ניהול המערכת')
     # Delete both an incomplete draft custom model and a persisted custom model without refreshing.
     page.get_by_role('tab',name='ספקי AI',exact=True).click()
     def add_other(name):

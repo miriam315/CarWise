@@ -51,6 +51,9 @@ public sealed class ReferenceData
         OfficialKey=[TaxYear.ToString(CultureInfo.InvariantCulture),c.Year.ToString(CultureInfo.InvariantCulture),"1",c.MakerCode,c.ModelCode] };
     public Occupation OccupationFor(string name)
     {
+        // An employee may be onboarded before a corporate occupation/group is assigned.
+        // These placeholders are never used for calculation while Group is empty.
+        if(string.IsNullOrWhiteSpace(name))return new("","",false,false,0);
         var d=OccupationDocuments.SingleOrDefault(o=>o["occupation"].GetString()==name)
             ?? throw new ArgumentException("יש לבחור עיסוק תקין");
         return new(name,d["group"].GetString()!,d["mandatory"].GetBoolean(),d["waiver"].GetBoolean(),d["maintenance"].GetDecimal());

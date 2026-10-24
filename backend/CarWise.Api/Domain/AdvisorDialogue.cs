@@ -18,7 +18,7 @@ public static class AdvisorDialogue
     {
         var missing=IntakeFields.Missing(employee);
         if(missing.Length==0)return "לפי הפרטים שאישרת, כל נתוני השכר והרכב הדרושים לחישוב כבר מולאו. לא חסר כרגע נתון אישי לחישוב.";
-        var labels=new Dictionary<string,string>{{"salary","שכר בסיס"},{"commission","עמלות"},{"bonus","בונוס"},{"pension","אחוז הפרשת עובד לפנסיה"},{"fund","אחוז הפרשת עובד לקרן השתלמות"},{"credits","נקודות זיכוי"},{"children","מספר ילדים בגיל הזכאות"},{"currentCar","הרכב הנוכחי"},{"participation","ההשתתפות האישית ברכב הנוכחי"}};
+        var labels=new Dictionary<string,string>{{"eligibility","קבוצת זכאות מאושרת"},{"salary","שכר בסיס"},{"commission","עמלות"},{"bonus","בונוס"},{"pension","אחוז הפרשת עובד לפנסיה"},{"fund","אחוז הפרשת עובד לקרן השתלמות"},{"credits","נקודות זיכוי"},{"children","מספר ילדים בגיל הזכאות"},{"currentCar","הרכב הנוכחי"},{"participation","ההשתתפות האישית ברכב הנוכחי"}};
         return "להשלמת החישוב חסרים: "+string.Join(", ",missing.Select(field=>labels[field]))+". "+IntakeFields.Question(missing[0],data);
     }
     public static HashSet<string> RejectedChoices(AdvisorState state,string? category)

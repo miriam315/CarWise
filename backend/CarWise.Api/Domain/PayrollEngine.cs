@@ -11,6 +11,8 @@ public sealed class PayrollEngine(ReferenceData data)
     {
         if(string.IsNullOrWhiteSpace(e.Id) || e.Id.Length>100 || e.Name.Length>100) throw new ArgumentException("מזהה עובד חסר או לא תקין");
         IntakeFields.ValidateKnowledge(e);
+        if(e.Occupation is null||e.Occupation.Length>100)throw new ArgumentException("עיסוק אינו תקין");
+        if(string.IsNullOrWhiteSpace(e.Occupation))e=e with{Occupation=data.Employees.SingleOrDefault(source=>source.Id==e.Id)?.Occupation??""};
         var o=data.OccupationFor(e.Occupation);
         foreach(var (value,max,name) in new[]{(e.Salary,200000m,"salary"),(e.Commission,200000m,"commission"),
             (e.Bonus,200000m,"bonus"),(e.Pension,20m,"pension"),(e.Fund,20m,"fund"),(e.Credits,30m,"credits"),
@@ -18,12 +20,13 @@ public sealed class PayrollEngine(ReferenceData data)
             if(value<0 || value>max) throw new ArgumentException("נתון מחוץ לטווח: "+name);
         if(decimal.Truncate(e.Children)!=e.Children) throw new ArgumentException("מספר הילדים חייב להיות שלם");
         if(e.CurrentCar is not null && !data.Cars.Any(c=>c.Id==e.CurrentCar)) throw new ArgumentException("הרכב הנוכחי אינו בקטלוג");
-        if(IntakeFields.Known(e,"currentCar") && e.CurrentCar is null && !o.Waiver) throw new ArgumentException("בעיסוק זה נדרש רכב נוכחי");
+        if(o.Group.Length>0 && IntakeFields.Known(e,"currentCar") && e.CurrentCar is null && !o.Waiver) throw new ArgumentException("בעיסוק זה נדרש רכב נוכחי");
         return e with {Group=o.Group};
     }
     public (bool Eligible,string Reason) Eligibility(Employee e,Car? car)
     {
         var o=data.OccupationFor(e.Occupation);
+        if(o.Group.Length==0)return(false,"קבוצת הזכאות טרם נקבעה; יש להשלים את השיוך לפני בחירת חלופה.");
         if(car is null) return (o.Waiver,o.Waiver?"העיסוק מאפשר ויתור על רכב":"בתפקיד שטח הרכב הוא כלי עבודה ולכן אי אפשר לוותר עליו");
         if(car.Group=="משפחתי")
         {
@@ -37,8 +40,7 @@ public sealed class PayrollEngine(ReferenceData data)
     }
     public Amounts Calculate(Employee employee,Car? car,decimal? participation=null)
     {
-        IntakeFields.RequireComplete(employee);
-        var e=Validate(employee); var occupation=data.OccupationFor(e.Occupation);
+        var e=Validate(employee);IntakeFields.RequireComplete(e);var occupation=data.OccupationFor(e.Occupation);
         var gross=e.Salary+e.Commission+e.Bonus;
         var maintenance=car is null?occupation.Maintenance:0m;var value=car is null?0m:data.Lookup(car).Value;
         var contributions=N["contributionsBase"]!.GetValue<string>()=="base"?e.Salary:gross;
@@ -94,8 +96,7 @@ public sealed class PayrollEngine(ReferenceData data)
     }
     public Simulation Simulate(Employee employee,IReadOnlyDictionary<string,decimal>? overrides=null,IReadOnlySet<string>? pending=null,IReadOnlyDictionary<string,string>? participationSources=null)
     {
-        IntakeFields.RequireComplete(employee);
-        var e=Validate(employee);var currentCar=data.Cars.SingleOrDefault(c=>c.Id==e.CurrentCar);
+        var e=Validate(employee);IntakeFields.RequireComplete(e);var currentCar=data.Cars.SingleOrDefault(c=>c.Id==e.CurrentCar);
         var before=Calculate(e,currentCar,e.Participation);var results=new List<Alternative>();
         foreach(var car in data.Cars.Cast<Car?>().Append(null))
         {
