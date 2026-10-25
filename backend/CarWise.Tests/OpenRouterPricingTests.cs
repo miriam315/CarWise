@@ -74,16 +74,25 @@ public sealed class OpenRouterPricingTests
         Assert.Null((await Recorder(Settings() with{OpenRouterPricingEnabled=false}).StartAsync(profile,"disabled",default)).Pricing);
         Assert.Null(new TokenUsage(1000,100,0,10).Cost(manual));Assert.NotNull(new TokenUsage(1000,0,0,10).Cost(manual));
     }
-    [Fact] public void SchedulerHonorsDisableDailyHourRestartFreshnessAndRetryBackoff()
+    [Fact] public void SchedulerHonorsDailyHourAndNeverRetriesOnTheSameUtcDay()
     {
         var now=DateTimeOffset.Parse("2026-10-24T10:00:00Z");var old=new OpenRouterCatalog(now.AddDays(-2),[]);var fresh=old with{RetrievedAt=now};var yesterday=old with{RetrievedAt=now.AddHours(-15)};
+        var midnight=new DateTimeOffset(now.UtcDateTime.Date,TimeSpan.Zero);
         Assert.True(OpenRouterPricing.ShouldRefresh(Settings(),null,null,now));
         Assert.False(OpenRouterPricing.ShouldRefresh(Settings() with{OpenRouterPricingEnabled=false},old,null,now));
         Assert.False(OpenRouterPricing.ShouldRefresh(Settings(),fresh,null,now));
         Assert.False(OpenRouterPricing.ShouldRefresh(Settings(),old,now.AddMinutes(-30),now));
-        Assert.True(OpenRouterPricing.ShouldRefresh(Settings(),old,now.AddHours(-1),now));
+        Assert.False(OpenRouterPricing.ShouldRefresh(Settings(),old,now.AddHours(-1),now));
+        Assert.False(OpenRouterPricing.ShouldRefresh(Settings(),old,midnight,now));
+        Assert.False(OpenRouterPricing.ShouldRefresh(Settings(),null,now.AddHours(-1),now));
+        Assert.True(OpenRouterPricing.ShouldRefresh(Settings(),old,now.AddDays(-1),now));
+        Assert.True(OpenRouterPricing.ShouldRefresh(Settings(),null,now.AddDays(-1),now));
+        Assert.False(OpenRouterPricing.ShouldRefresh(Settings(),old,now.AddDays(-1),midnight.AddHours(2)));
+        Assert.False(OpenRouterPricing.ShouldRefresh(Settings(),null,now.AddDays(-1),midnight.AddHours(2)));
         Assert.False(OpenRouterPricing.ShouldRefresh(Settings() with{OpenRouterPricingUpdateHourUtc=17},yesterday,null,now));
         Assert.True(OpenRouterPricing.ShouldRefresh(Settings() with{OpenRouterPricingUpdateHourUtc=3},yesterday,null,now));
+        Assert.False(OpenRouterPricing.ShouldRefresh(Settings() with{OpenRouterPricingUpdateHourUtc=17},old,null,now));
+        Assert.True(OpenRouterPricing.ShouldRefresh(Settings(),old,null,now.ToOffset(TimeSpan.FromHours(-9))));
     }
     [Fact] public void PricingSettingsAreOperationalAndValidationRejectsBadMappingsAndHours()
     {

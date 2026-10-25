@@ -112,10 +112,14 @@ public sealed class OpenRouterPricing(IJsonDatabase database,IHttpClientFactory 
     }
     public object View()=>new{source=Source,catalog=Current,lastAttempt=LastAttempt,error=LastError,
         stale=Current is null||Current.RetrievedAt<DateTimeOffset.UtcNow.AddHours(-36)};
-    public static bool ShouldRefresh(AiConfiguration settings,OpenRouterCatalog? catalog,DateTimeOffset? lastAttempt,DateTimeOffset now)=>
-        settings.OpenRouterPricingEnabled&&settings.RegisteredModels().Any(model=>SourceModel(model.Profile,settings) is not null)&&
-        (lastAttempt is null||now-lastAttempt>=TimeSpan.FromHours(1))&&
-        (catalog is null||catalog.RetrievedAt<now.AddDays(-1)||(now.Hour>=settings.OpenRouterPricingUpdateHourUtc&&catalog.RetrievedAt.UtcDateTime.Date<now.UtcDateTime.Date));
+    public static bool ShouldRefresh(AiConfiguration settings,OpenRouterCatalog? catalog,DateTimeOffset? lastAttempt,DateTimeOffset now)
+    {
+        var utc=now.ToUniversalTime();
+        return settings.OpenRouterPricingEnabled&&settings.RegisteredModels().Any(model=>SourceModel(model.Profile,settings) is not null)&&
+            (lastAttempt is null||lastAttempt.Value.UtcDateTime.Date<utc.Date)&&
+            ((catalog is null&&lastAttempt is null)||
+                (utc.Hour>=settings.OpenRouterPricingUpdateHourUtc&&(catalog is null||catalog.RetrievedAt.UtcDateTime.Date<utc.Date)));
+    }
 }
 public sealed class OpenRouterPricingWorker(OpenRouterPricing pricing,ConfigurationState configuration,ILogger<OpenRouterPricingWorker> logger):BackgroundService
 {
