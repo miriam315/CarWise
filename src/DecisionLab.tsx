@@ -1,3 +1,4 @@
+import {usePageScrollReset} from './pageScroll';
 import {useEffect,useRef,useState} from 'react';
 import {FlaskConical,ShieldCheck,Bookmark,ArrowLeft,TrendingUp,CalendarDays,RefreshCw,Info} from 'lucide-react';
 import {api} from './api';
@@ -18,6 +19,7 @@ export function ChoiceUpdateNotice({employee,revision,onOpen}:{employee:Employee
 }
 export default function DecisionLab({employee,data,target,onTarget,onProfile,eligibleTargets,initialTab='lab'}:{employee:Employee;data:Data;target:string;onTarget:(id:string)=>void;onProfile:()=>void;eligibleTargets:string[];initialTab?:string}){
  const [tab,setTab]=useState(initialTab),[analysis,setAnalysis]=useState<any>(null),[state,setState]=useState<any>(null),[error,setError]=useState(''),[notice,setNotice]=useState(''),[loading,setLoading]=useState(false);
+ usePageScrollReset(tab);
  const [commission,setCommission]=useState(employee.commission),[bonus,setBonus]=useState(employee.bonus),[part,setPart]=useState(''),[axis,setAxis]=useState('commission'),[maximum,setMaximum]=useState(10000),[point,setPoint]=useState(0);
  const [first,setFirst]=useState(''),[second,setSecond]=useState('');const generation=useRef(0),interacted=useRef(false);
  useEffect(()=>setTab(initialTab),[initialTab]);

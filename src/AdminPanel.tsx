@@ -1,3 +1,4 @@
+import {usePageScrollReset} from './pageScroll';
 import SystemLogs from './SystemLogs';
 import {known,payrollFields} from './profileKnowledge';
 import {useEffect,useRef,useState} from 'react';
@@ -36,6 +37,7 @@ export default function AdminPanel({onApplied}:{onApplied:()=>Promise<void>}){
  const [mediaBusy,setMediaBusy]=useState(false);
  const [occupationPending,setOccupationPending]=useState(false);
  const [tab,setTab]=useState('overview'),[busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState(''),[note,setNote]=useState('');
+ usePageScrollReset(tab);
  const [backupSecrets,setBackupSecrets]=useState<Record<string,Record<string,string>>>({});
  const testGeneration=useRef(0);
  const [keys,setKeys]=useState<Record<string,string>>({}),[tests,setTests]=useState<Record<string,TestResult>>({}),[testing,setTesting]=useState('');

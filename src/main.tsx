@@ -1,3 +1,4 @@
+import {usePageScrollReset} from './pageScroll';
 import ChatHistory from './ChatHistory';
 import {ChatProgress,TypingReply} from './ChatFeedback';
 import {ChatDate,ChatTime,chatDay} from './ChatDate';
@@ -45,6 +46,7 @@ function App(){
  useEffect(()=>setHistoryOpen(false),[employee?.id]);
  useEffect(()=>{if(!chatOpen||historyOpen)setTypingReply(null)},[chatOpen,historyOpen]);
  const [page,setPage]=useState('dashboard'),[selected,setSelected]=useState('CAR-10'),[tickets,setTickets]=useState<Ticket[]>([]),[messages,setMessages]=useState<Message[]>([]);
+ usePageScrollReset(page);
  const [error,setError]=useState(''),[toast,setToast]=useState(''),[detail,setDetail]=useState<Result|null>(null),[sidebar,setSidebar]=useState(false),[busy,setBusy]=useState(false),[prompt,setPrompt]=useState('');
  useEffect(()=>{if(page==='fleet'&&data?.fleetVisible===false)setPage('dashboard')},[page,data?.fleetVisible]);
  const [filter,setFilter]=useState('הכול'),[query,setQuery]=useState(''),[onlyEligible,setOnlyEligible]=useState(true),[form,setForm]=useState<Employee|null>(null);

@@ -97,6 +97,8 @@ def check(query, page, nav, screenshots):
     review.locator('li').filter(has_text='existing-review@example.invalid').get_by_role('button').click()
     expect(page.get_by_label('דוא״ל להתחברות',exact=True)).to_have_value('existing-review@example.invalid')
     expect(page.get_by_label('סיסמה להתחברות',exact=True)).to_have_value('SYNTHETIC-EXISTING-PASSWORD')
+    assert page.evaluate('window.scrollY')==0
+    expect(page.get_by_label('דוא״ל להתחברות',exact=True)).to_be_focused()
     review.get_by_role('button',name='הסתרת חשבונות לבדיקה',exact=True).click()
     expect(review.locator('li')).to_have_count(0)
     assert login_positions()==collapsed

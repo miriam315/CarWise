@@ -33,6 +33,11 @@ def check(query,page,nav,screenshots):
     assert bounds and bounds['width']<=50 and bounds['height']<=50
 
     nav('קטלוג הרכבים')
+    page.evaluate('window.scrollTo(0,document.documentElement.scrollHeight)')
+    assert page.evaluate('window.scrollY')>100
+    nav('הנתונים שלי')
+    assert page.evaluate('window.scrollY')==0
+    nav('קטלוג הרכבים')
     heading=page.get_by_role('heading',name='נעים להכיר. האפשרויות שלך.',exact=True)
     expect(heading).to_be_visible();windows=len(page.context.pages)
     page.get_by_role('button',name='פתיחת היועץ החכם',exact=True).click()
@@ -76,6 +81,13 @@ def check(query,page,nav,screenshots):
     expect(tabs.locator('.admin-tab-group')).to_have_count(4)
     expect(tabs.locator('.admin-tab-group').filter(has=page.get_by_role('tab',name='ספקי AI',exact=True))).to_contain_text('פרומפטים ותלושים')
     assert tabs.evaluate('(e)=>e.scrollWidth<=e.clientWidth+1')
+    page.get_by_role('tab',name='קטלוג רכבים',exact=True).click()
+    page.evaluate('window.scrollTo(0,document.documentElement.scrollHeight)')
+    assert page.evaluate('window.scrollY')>100
+    page.get_by_role('tab',name='מס והפרשות',exact=True).dispatch_event('click')
+    expect(page.get_by_role('tab',name='מס והפרשות',exact=True)).to_have_attribute('aria-selected','true')
+    assert page.evaluate('window.scrollY')==0
+    page.get_by_role('tab',name='סקירה',exact=True).click()
     page.screenshot(path=str(screenshots/'grouped-admin-tabs-desktop.png'))
     page.set_viewport_size({'width':390,'height':844});page.wait_for_timeout(250)
     assert tabs.evaluate('(e)=>e.scrollWidth<=e.clientWidth+1')
